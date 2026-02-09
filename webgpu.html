@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>WebGPU OIT Diagnostic</title>
+<style>
+  * { box-sizing: border-box; }
+  body { 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+    padding: 16px; 
+    color: #1a1a1a; 
+    line-height: 1.6; 
+    background: #f5f5f7;
+    margin: 0;
+  }
+  h3 { margin-top: 0; color: #000; font-size: 18px; }
+  pre { 
+    background: #fff; 
+    padding: 12px; 
+    border-radius: 8px; 
+    overflow-x: auto; 
+    font-size: 11px; 
+    border: 1px solid #e0e0e0; 
+    white-space: pre-wrap; 
+    word-break: break-all;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .section { 
+    background: #fff; 
+    padding: 16px; 
+    margin: 12px 0; 
+    border-radius: 12px; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+  }
+  .ok { color: #34c759; font-weight: 600; }
+  .no { color: #ff3b30; font-weight: 600; }
+  .warn { color: #ff9500; font-weight: 600; }
+  .info { color: #007aff; font-weight: 600; }
+  .critical { color: #ff3b30; font-weight: 700; background: #ffe5e5; padding: 2px 6px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  td, th { border: 1px solid #e0e0e0; padding: 8px; text-align: left; }
+  th { background: #f8f8f8; font-weight: 600; }
+  .test-result { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px; }
+  .test-pass { background: #d4edda; color: #155724; }
+  .test-fail { background: #f8d7da; color: #721c24; }
+  .test-warn { background: #fff3cd; color: #856404; }
+  button { 
+    background: #007aff; 
+    color: white; 
+    border: none; 
+    padding: 12px 24px; 
+    border-radius: 8px; 
+    font-size: 16px; 
+    cursor: pointer; 
+    margin: 8px 0;
+    width: 100%;
+  }
+  button:active { opacity: 0.8; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+  #canvas-container { display: none; }
+  .summary-box { 
+    background: #f0f0f0; 
+    padding: 12px; 
+    border-radius: 8px; 
+    margin: 8px 0;
+    border-left: 4px solid #007aff;
+  }
+  .error-box {
+    background: #ffe5e5;
+    border-left-color: #ff3b30;
+  }
+  .success-box {
+    background: #e5f5e5;
+    border-left-color: #34c759;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .feature-item {
+    background: #f8f8f8;
+    padding: 8px;
+    border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+<h3>🚀 WebGPU OIT Diagnostic</h3>
+<p>WebGPU 기반 Weighted Blended OIT 호환성 테스트<br>
+iOS Safari, Chrome, Edge 등 다양한 환경에서 WebGPU 지원 상태 확인</p>
+
+<div class="section">
+  <strong>상태:</strong> <span id="status">준비됨 - 아래 버튼을 눌러 시작</span>
+  <div id="progress-container" style="margin-top: 8px; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden; display: none;">
+    <div id="progress-bar" style="width: 0%; height: 100%; background: #007aff; transition: width 0.3s;"></div>
+  </div>
+</div>
+
+<button id="start-btn" onclick="runDiagnostics()">🔍 진단 시작</button>
+<button id="copy-btn" onclick="copyResults()" style="display: none; background: #34c759;">📋 결과 복사</button>
+
+<pre id="log">결과가 여기에 표시됩니다...</pre>
+
+<div id="summary" style="display: none;"></div>
+
+<div id="canvas-container"></div>
+
+<script>
+let finalResults = {};
+let logText = '';
+
+function updateStatus(msg) {
+  document.getElementById('status').textContent = msg;
+  console.log('[Status]', msg);
+}
+
+function setProgress(pct) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+function log(title, ...args) {
+  const timestamp = new Date().toLocaleTimeString();
+  const content = args.map(a => {
+    if (a === null) return 'null';
+    if (a === undefined) return 'undefined';
+    if (typeof a === 'object') {
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return '[Object]';
+      }
+    }
+    return String(a);
+  }).join(' ');
+  
+  const line = `[${timestamp}] ${title} ${content}`;
+  console.log(line);
+  
+  const logEl = document.getElementById('log');
+  logEl.textContent += (logEl.textContent ? '\n' : '') + line;
+  logText += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function showSummary(html, type = 'info') {
+  const summary = document.getElementById('summary');
+  summary.innerHTML = html;
+  summary.className = 'section summary-box ' + (type === 'error' ? 'error-box' : type === 'success' ? 'success-box' : '');
+  summary.style.display = 'block';
+}
+
+async function runDiagnostics() {
+  const startBtn = document.getElementById('start-btn');
+  const copyBtn = document.getElementById('copy-btn');
+  const progressContainer = document.getElementById('progress-container');
+  
+  startBtn.disabled = true;
+  startBtn.textContent = '⏳ 테스트 진행중...';
+  progressContainer.style.display = 'block';
+  document.getElementById('log').textContent = '';
+  logText = '';
+  document.getElementById('summary').style.display = 'none';
+  
+  const results = {
+    webgpu: false,
+    userAgent: navigator.userAgent,
+    adapter: null,
+    device: null,
+    features: {},
+    limits: {},
+    textureFormats: {},
+    oit: {},
+    timestamp: new Date().toISOString()
+  };
+  
+  try {
+    updateStatus('WebGPU 지원 여부 확인...');
+    setProgress(5);
+    
+    if (!navigator.gpu) {
+      log('FATAL', 'WebGPU not supported - navigator.gpu is undefined');
+      log('CHECK', 'Use Chrome 113+, Edge 113+, Safari 17.5+, or Firefox Nightly');
+      
+      showSummary(`
+        <strong>❌ WebGPU 미지원</strong><br>
+        이 브라우저는 WebGPU를 지원하지 않습니다.<br>
+        <br>
+        <strong>지원 브라우저:</strong><br>
+        • Chrome 113+ (Windows, macOS, Android)<br>
+        • Edge 113+<br>
+        • Safari 17.5+ (iOS 17.5+, macOS Sonoma+)<br>
+        • Firefox Nightly (플래그 활성화 필요)
+      `, 'error');
+      
+      finalResults = results;
+      startBtn.disabled = false;
+      startBtn.textContent = '🔍 다시 시도';
+      return;
+    }
+    
+    log('BASIC', 'navigator.gpu exists ✅');
+    
+    updateStatus('GPU Adapter 요청...');
+    setProgress(15);
+    
+    const adapter = await navigator.gpu.requestAdapter({
+      powerPreference: 'high-performance'
+    });
+    
+    if (!adapter) {
+      log('FATAL', 'Failed to get GPU adapter - may be blocked or no suitable GPU');
+      showSummary('<strong>❌ GPU Adapter 획득 실패</strong><br>하드웨어 가속이 비활성화되었거나 적합한 GPU가 없습니다.', 'error');
+      finalResults = results;
+      startBtn.disabled = false;
+      startBtn.textContent = '🔍 다시 시도';
+      return;
+    }
+    
+    results.adapter = {
+      vendor: adapter.info?.vendor || 'unknown',
+      architecture: adapter.info?.architecture || 'unknown',
+      device: adapter.info?.device || 'unknown',
+      description: adapter.info?.description || 'unknown'
+    };
+    
+    log('ADAPTER', 'Vendor:', results.adapter.vendor);
+    log('ADAPTER', 'Architecture:', results.adapter.architecture);
+    log('ADAPTER', 'Device:', results.adapter.device);
+    log('ADAPTER', 'Description:', results.adapter.description);
+    
+    updateStatus('GPU Device 생성...');
+    setProgress(25);
+    
+    const requiredFeatures = [];
+    const deviceDescriptor = {
+      requiredFeatures,
+      requiredLimits: {}
+    };
+    
+    let device;
+    try {
+      device = await adapter.requestDevice(deviceDescriptor);
+    } catch (err) {
+      log('RETRY', 'Failed with default limits, trying with minimal limits...');
+      deviceDescriptor.requiredLimits = {};
+      try {
+        device = await adapter.requestDevice({});
+      } catch (err2) {
+        log('FATAL', 'Failed to create device:', err2.message);
+        showSummary('<strong>❌ GPU Device 생성 실패</strong><br>' + err2.message, 'error');
+        finalResults = results;
+        startBtn.disabled = false;
+        startBtn.textContent = '🔍 다시 시도';
+        return;
+      }
+    }
+    
+    results.device = {
+      lost: false
+    };
+    
+    device.lost.then((info) => {
+      results.device.lost = true;
+      results.device.lostReason = info.reason;
+      results.device.lostMessage = info.message;
+      log('DEVICE_LOST', info.reason, info.message);
+    });
+    
+    results.webgpu = true;
+    log('DEVICE', 'Created successfully ✅');
+    
+    updateStatus('Adapter 기능 및 한도 확인...');
+    setProgress(35);
+    
+    log('\n=== ADAPTER FEATURES ===');
+    const adapterFeatures = Array.from(adapter.features);
+    const keyFeatures = [
+      'depth-clip-control',
+      'timestamp-query',
+      'indirect-first-instance',
+      'shader-f16',
+      'rg11b10ufloat-renderable',
+      'bgra8unorm-storage',
+      'float32-filterable',
+      'float32-blendable',
+      'clip-distances',
+      'dual-source-blending'
+    ];
+    
+    for (const feature of keyFeatures) {
+      const supported = adapterFeatures.includes(feature);
+      results.features[feature] = supported;
+      const marker = supported ? '✅' : '❌';
+      log('FEATURE', marker, feature);
+    }
+    
+    log('\n=== ADAPTER LIMITS ===');
+    const limits = adapter.limits;
+    results.limits = {
+      maxTextureDimension1D: limits.maxTextureDimension1D,
+      maxTextureDimension2D: limits.maxTextureDimension2D,
+      maxTextureDimension3D: limits.maxTextureDimension3D,
+      maxTextureArrayLayers: limits.maxTextureArrayLayers,
+      maxBindGroups: limits.maxBindGroups,
+      maxBindGroupsPlusVertexBuffers: limits.maxBindGroupsPlusVertexBuffers,
+      maxBindingsPerBindGroup: limits.maxBindingsPerBindGroup,
+      maxSampledTexturesPerShaderStage: limits.maxSampledTexturesPerShaderStage,
+      maxSamplersPerShaderStage: limits.maxSamplersPerShaderStage,
+      maxStorageBuffersPerShaderStage: limits.maxStorageBuffersPerShaderStage,
+      maxStorageTexturesPerShaderStage: limits.maxStorageTexturesPerShaderStage,
+      maxUniformBuffersPerShaderStage: limits.maxUniformBuffersPerShaderStage,
+      maxUniformBufferBindingSize: limits.maxUniformBufferBindingSize,
+      maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+      maxVertexBuffers: limits.maxVertexBuffers,
+      maxBufferSize: limits.maxBufferSize,
+      maxColorAttachments: limits.maxColorAttachments,
+      maxColorAttachmentBytesPerSample: limits.maxColorAttachmentBytesPerSample,
+      maxComputeWorkgroupStorageSize: limits.maxComputeWorkgroupStorageSize,
+      maxComputeInvocationsPerWorkgroup: limits.maxComputeInvocationsPerWorkgroup
+    };
+    
+    for (const [key, value] of Object.entries(results.limits)) {
+      log('LIMIT', key, value);
+    }
+    
+    updateStatus('핵심 OIT 기능 테스트...');
+    setProgress(50);
+    
+    log('\n=== OIT CRITICAL FEATURES ===');
+    
+    // OIT에 필수적인 기능들
+    const oitCritical = {
+      float32Blendable: adapterFeatures.includes('float32-blendable'),
+      rg11b10ufloatRenderable: adapterFeatures.includes('rg11b10ufloat-renderable'),
+      dualSourceBlending: adapterFeatures.includes('dual-source-blending'),
+      shaderF16: adapterFeatures.includes('shader-f16')
+    };
+    
+    results.oit.criticalFeatures = oitCritical;
+    
+    log('OIT', 'float32-blendable:', oitCritical.float32Blendable ? '✅ (Required for float blending)' : '❌');
+    log('OIT', 'rg11b10ufloat-renderable:', oitCritical.rg11b10ufloatRenderable ? '✅' : '❌');
+    log('OIT', 'dual-source-blending:', oitCritical.dualSourceBlending ? '✅' : '❌');
+    log('OIT', 'shader-f16:', oitCritical.shaderF16 ? '✅ (Useful for half-float OIT)' : '❌');
+    
+    if (!oitCritical.float32Blendable) {
+      log('WARNING', 'float32-blendable not supported!');
+      log('IMPACT', 'Cannot blend float32 textures - OIT accumulation pass may fail');
+      log('WORKAROUND', 'Use rgba16float or compute shader-based OIT');
+    }
+    
+    updateStatus('Texture Format 지원 테스트...');
+    setProgress(65);
+    
+    log('\n=== TEXTURE FORMAT SUPPORT ===');
+    
+    const testFormats = [
+      { name: 'rgba8unorm', format: 'rgba8unorm' },
+      { name: 'rgba16float', format: 'rgba16float' },
+      { name: 'rgba32float', format: 'rgba32float' },
+      { name: 'rg16float', format: 'rg16float' },
+      { name: 'rg32float', format: 'rg32float' },
+      { name: 'r16float', format: 'r16float' },
+      { name: 'r32float', format: 'r32float' },
+      { name: 'bgra8unorm', format: 'bgra8unorm' },
+      { name: 'rg11b10ufloat', format: 'rg11b10ufloat' }
+    ];
+    
+    for (const { name, format } of testFormats) {
+      try {
+        const texture = device.createTexture({
+          size: [64, 64],
+          format: format,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
+        
+        const supported = !!texture;
+        results.textureFormats[name] = {
+          supported: supported,
+          renderable: true,
+          blendable: null // Will test separately
+        };
+        log('FORMAT', name, supported ? '✅' : '❌');
+        texture.destroy();
+      } catch (e) {
+        results.textureFormats[name] = { supported: false, error: e.message };
+        log('FORMAT', name, '❌', e.message);
+      }
+    }
+    
+    updateStatus('Render Pipeline 및 Blending 테스트...');
+    setProgress(80);
+    
+    log('\n=== RENDER PIPELINE & BLENDING TESTS ===');
+    
+    // Test 1: Basic render pipeline
+    try {
+      const shaderModule = device.createShaderModule({
+        label: 'Basic OIT shader',
+        code: `
+          @vertex
+          fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+            var pos = array<vec2f, 3>(
+              vec2f(-1.0, -1.0),
+              vec2f( 3.0, -1.0),
+              vec2f(-1.0,  3.0)
+            );
+            return vec4f(pos[vertexIndex], 0.0, 1.0);
+          }
+          
+          @fragment
+          fn fsMain() -> @location(0) vec4f {
+            return vec4f(1.0, 0.0, 0.0, 0.5);
+          }
+        `
+      });
+      
+      const pipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+          module: shaderModule,
+          entryPoint: 'vsMain'
+        },
+        fragment: {
+          module: shaderModule,
+          entryPoint: 'fsMain',
+          targets: [{
+            format: 'rgba8unorm',
+            blend: {
+              color: {
+                srcFactor: 'one',
+                dstFactor: 'one',
+                operation: 'add'
+              },
+              alpha: {
+                srcFactor: 'one',
+                dstFactor: 'one',
+                operation: 'add'
+              }
+            }
+          }]
+        }
+      });
+      
+      log('PIPELINE', 'Basic blend pipeline created ✅');
+      results.oit.basicPipeline = true;
+    } catch (e) {
+      log('PIPELINE', 'Basic pipeline failed ❌', e.message);
+      results.oit.basicPipeline = false;
+    }
+    
+    // Test 2: Float render target with blending
+    if (results.textureFormats.rgba16float?.supported) {
+      try {
+        const shaderModule = device.createShaderModule({
+          code: `
+            @vertex
+            fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+              var pos = array<vec2f, 3>(
+                vec2f(-1.0, -1.0),
+                vec2f( 3.0, -1.0),
+                vec2f(-1.0,  3.0)
+              );
+              return vec4f(pos[vertexIndex], 0.0, 1.0);
+            }
+            
+            @fragment
+            fn fsMain() -> @location(0) vec4f {
+              return vec4f(1.0, 0.5, 0.0, 0.8);
+            }
+          `
+        });
+        
+        const pipeline = device.createRenderPipeline({
+          layout: 'auto',
+          vertex: {
+            module: shaderModule,
+            entryPoint: 'vsMain'
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: 'fsMain',
+            targets: [{
+              format: 'rgba16float',
+              blend: oitCritical.float32Blendable || oitCritical.shaderF16 ? {
+                color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+                alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }
+              } : undefined
+            }]
+          }
+        });
+        
+        log('PIPELINE', 'Float16 blend pipeline created ✅');
+        results.oit.float16Pipeline = true;
+        
+        // 실제 렌더링 테스트
+        const texture = device.createTexture({
+          size: [64, 64],
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+        });
+        
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: texture.createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 0 }
+          }]
+        });
+        pass.setPipeline(pipeline);
+        pass.draw(3);
+        pass.end();
+        
+        device.queue.submit([encoder.finish()]);
+        await device.queue.onSubmittedWorkDone();
+        
+        log('RENDER', 'Float16 render + blend successful ✅');
+        results.oit.float16Render = true;
+        
+        texture.destroy();
+      } catch (e) {
+        log('PIPELINE', 'Float16 pipeline failed ❌', e.message);
+        results.oit.float16Pipeline = false;
+        results.oit.float16Render = false;
+      }
+    }
+    
+    // Test 3: Multiple render targets (MRT) - OIT에 필수
+    log('\n=== MULTIPLE RENDER TARGETS (MRT) ===');
+    
+    try {
+      const mrtShader = device.createShaderModule({
+        code: `
+          @vertex
+          fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+            var pos = array<vec2f, 3>(
+              vec2f(-1.0, -1.0),
+              vec2f( 3.0, -1.0),
+              vec2f(-1.0,  3.0)
+            );
+            return vec4f(pos[vertexIndex], 0.0, 1.0);
+          }
+          
+          struct FragmentOutput {
+            @location(0) accum: vec4f,
+            @location(1) reveal: vec4f,
+          }
+          
+          @fragment
+          fn fsMain() -> FragmentOutput {
+            var out: FragmentOutput;
+            out.accum = vec4f(1.0, 0.0, 0.0, 0.5);
+            out.reveal = vec4f(0.5, 0.0, 0.0, 0.0);
+            return out;
+          }
+        `
+      });
+      
+      const accumTexture = device.createTexture({
+        size: [64, 64],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+      });
+      
+      const revealTexture = device.createTexture({
+        size: [64, 64],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+      });
+      
+      const mrtPipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+          module: mrtShader,
+          entryPoint: 'vsMain'
+        },
+        fragment: {
+          module: mrtShader,
+          entryPoint: 'fsMain',
+          targets: [
+            {
+              format: 'rgba16float',
+              blend: {
+                color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+                alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }
+              }
+            },
+            {
+              format: 'rgba16float',
+              blend: {
+                color: { srcFactor: 'zero', dstFactor: 'one-minus-src', operation: 'add' },
+                alpha: { srcFactor: 'zero', dstFactor: 'one-minus-src', operation: 'add' }
+              }
+            }
+          ]
+        }
+      });
+      
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: accumTexture.createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 0 }
+          },
+          {
+            view: revealTexture.createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 1, g: 0, b: 0, a: 0 }
+          }
+        ]
+      });
+      pass.setPipeline(mrtPipeline);
+      pass.draw(3);
+      pass.end();
+      
+      device.queue.submit([encoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      
+      log('MRT', 'Two-target OIT pipeline successful ✅');
+      results.oit.mrtSupported = true;
+      results.oit.mrtBlendDifferent = true;
+      
+      accumTexture.destroy();
+      revealTexture.destroy();
+    } catch (e) {
+      log('MRT', 'MRT pipeline failed ❌', e.message);
+      results.oit.mrtSupported = false;
+    }
+    
+    // Test 4: Storage texture (Compute shader OIT alternative)
+    log('\n=== COMPUTE SHADER SUPPORT ===');
+    
+    try {
+      const computeShader = device.createShaderModule({
+        code: `
+          @group(0) @binding(0) var inputTex: texture_2d<f32>;
+          @group(0) @binding(1) var outputTex: texture_storage_2d<rgba16float, write>;
+          
+          @compute @workgroup_size(8, 8)
+          fn main(@builtin(global_invocation_id) global_id: vec3u) {
+            let coord = vec2i(global_id.xy);
+            let color = textureLoad(inputTex, coord, 0);
+            textureStore(outputTex, coord, color + vec4f(0.1, 0.0, 0.0, 0.0));
+          }
+        `
+      });
+      
+      const computePipeline = device.createComputePipeline({
+        layout: 'auto',
+        compute: {
+          module: computeShader,
+          entryPoint: 'main'
+        }
+      });
+      
+      log('COMPUTE', 'Compute pipeline created ✅');
+      results.oit.computeSupported = true;
+    } catch (e) {
+      log('COMPUTE', 'Compute pipeline failed ❌', e.message);
+      results.oit.computeSupported = false;
+    }
+    
+    updateStatus('최종 분석...');
+    setProgress(100);
+    
+    finalResults = results;
+    
+    // 요약
+    log('\n========================================');
+    log('FINAL SUMMARY');
+    log('========================================');
+    
+    const summaryLines = [
+      `<strong>WebGPU:</strong> ${results.webgpu ? '✅' : '❌'}`,
+      `<strong>Adapter:</strong> ${results.adapter?.vendor || 'N/A'} - ${results.adapter?.architecture || 'N/A'}`,
+      `<strong>float32-blendable:</strong> ${results.features['float32-blendable'] ? '✅' : '❌'}`,
+      `<strong>shader-f16:</strong> ${results.features['shader-f16'] ? '✅' : '❌'}`,
+      `<strong>RGBA16Float:</strong> ${results.textureFormats.rgba16float?.supported ? '✅' : '❌'}`,
+      `<strong>MRT with Different Blend:</strong> ${results.oit.mrtBlendDifferent ? '✅' : '❌'}`,
+      `<strong>Compute:</strong> ${results.oit.computeSupported ? '✅' : '❌'}`
+    ];
+    
+    let diagnosis = '';
+    let summaryType = 'info';
+    
+    if (!results.webgpu) {
+      diagnosis = '<strong>❌ WebGPU 미지원</strong><br>브라우저가 WebGPU를 지원하지 않습니다.';
+      summaryType = 'error';
+    } else if (!results.oit.mrtSupported) {
+      diagnosis = '<strong>❌ MRT 미지원</strong><br>Multiple Render Targets를 생성할 수 없어 OIT가 불가능합니다.';
+      summaryType = 'error';
+    } else if (!results.features['float32-blendable'] && !results.features['shader-f16']) {
+      if (results.oit.computeSupported) {
+        diagnosis = '<strong>⚠️ 제한적 OIT 지원</strong><br>Float blending 미지원, but Compute Shader 기반 OIT 가능<br><br><strong>권장:</strong> Compute Shader 기반 Linked List OIT 사용';
+        summaryType = 'warn';
+      } else {
+        diagnosis = '<strong>❌ OIT 불가능</strong><br>Float blending과 Compute Shader 모두 지원되지 않습니다.';
+        summaryType = 'error';
+      }
+    } else if (!results.oit.mrtBlendDifferent) {
+      diagnosis = '<strong>⚠️ MRT Blending 제한</strong><br>Multiple render targets에 서로 다른 blend mode 적용 불가<br><br><strong>해결책:</strong> Two-pass approach (accumulation → revealage separately)';
+      summaryType = 'warn';
+    } else {
+      diagnosis = '<strong>✅ OIT 완전 지원</strong><br>Weighted Blended OIT (McGuire 방식) 구현 가능';
+      summaryType = 'success';
+    }
+    
+    showSummary(`
+      <div class="feature-grid" style="margin-bottom: 12px;">
+        ${summaryLines.map(line => `<div class="feature-item">${line}</div>`).join('')}
+      </div>
+      <div style="border-top: 1px solid #ddd; padding-top: 12px;">
+        ${diagnosis}
+      </div>
+    `, summaryType);
+    
+    startBtn.disabled = false;
+    startBtn.textContent = '🔍 다시 시도';
+    copyBtn.style.display = 'block';
+    
+  } catch (err) {
+    log('FATAL_ERROR', err.message, err.stack);
+    updateStatus('오류 발생');
+    startBtn.disabled = false;
+    startBtn.textContent = '🔍 다시 시도';
+  }
+}
+
+function copyResults() {
+  const textToCopy = `WebGPU OIT Diagnostic Results\n` +
+    `Timestamp: ${finalResults.timestamp}\n` +
+    `User Agent: ${finalResults.userAgent}\n` +
+    `Adapter: ${finalResults.adapter?.vendor || 'N/A'} ${finalResults.adapter?.architecture || ''}\n` +
+    `Device: ${finalResults.adapter?.device || 'N/A'}\n\n` +
+    `WebGPU: ${finalResults.webgpu}\n` +
+    `float32-blendable: ${finalResults.features?.['float32-blendable']}\n` +
+    `shader-f16: ${finalResults.features?.['shader-f16']}\n` +
+    `dual-source-blending: ${finalResults.features?.['dual-source-blending']}\n` +
+    `RGBA16Float: ${finalResults.textureFormats?.rgba16float?.supported}\n` +
+    `RGBA32Float: ${finalResults.textureFormats?.rgba32float?.supported}\n` +
+    `MRT Supported: ${finalResults.oit?.mrtSupported}\n` +
+    `MRT Different Blend: ${finalResults.oit?.mrtBlendDifferent}\n` +
+    `Compute Supported: ${finalResults.oit?.computeSupported}\n` +
+    `OIT Possible: ${finalResults.oit?.mrtSupported && (finalResults.features?.['float32-blendable'] || finalResults.oit?.computeSupported)}\n\n` +
+    `Full Log:\n${logText}`;
+  
+  const textarea = document.createElement('textarea');
+  textarea.value = textToCopy;
+  document.body.appendChild(textarea);
+  textarea.select();
+  
+  try {
+    document.execCommand('copy');
+    alert('결과가 클립보드에 복사되었습니다!');
+  } catch (err) {
+    alert('복사 실패. 콘솔에서 수동으로 복사해주세요.');
+    console.log(textToCopy);
+  }
+  
+  document.body.removeChild(textarea);
+}
+</script>
+</body>
+</html>
