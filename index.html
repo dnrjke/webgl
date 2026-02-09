@@ -5,73 +5,164 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>WebGL2 / OIT Diagnostic</title>
 <style>
-  body { font-family: system-ui, -apple-system, Roboto, Arial; padding: 18px; color:#111 }
-  pre { background:#f6f8fa; padding:12px; border-radius:6px; overflow:auto }
-  .ok { color: #0a8; font-weight:600 }
-  .no { color: #d33; font-weight:600 }
-  .warn { color:#e6a600; font-weight:600 }
-  table { border-collapse:collapse; margin-top:12px }
-  td, th { border:1px solid #ddd; padding:8px; font-size:13px }
+  :root{--bg:#fff;--muted:#6b7280;--ok:#0a8;--bad:#d33;--warn:#e6a600}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:18px; color:#111; background:var(--bg)}
+  h1{font-size:18px; margin:0 0 8px}
+  p{margin:6px 0 12px; color:var(--muted)}
+  #canvasWrap{display:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+  .card{border:1px solid #e6e9ee;border-radius:8px;padding:12px;background:#fbfcfe}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px;border-bottom:1px solid #eef2f7;text-align:left}
+  th{background:#f6f8fa;font-weight:600}
+  .status{font-weight:700}
+  .ok{color:var(--ok)}
+  .no{color:var(--bad)}
+  .warn{color:var(--warn)}
+  pre#console{background:#0b1220;color:#dbeafe;padding:12px;border-radius:6px;overflow:auto;max-height:260px}
+  .small{font-size:12px;color:var(--muted)}
+  .btn{display:inline-block;padding:8px 10px;border-radius:6px;background:#0b5fff;color:#fff;text-decoration:none;font-weight:600;margin-top:8px}
+  .hint{margin-top:8px;font-size:13px;color:var(--muted)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:13px}
 </style>
 </head>
 <body>
-<h3>WebGL2 / OIT Diagnostic</h3>
-<p>페이지가 로드되면 자동으로 진단을 실행합니다. 콘솔과 아래 결과를 확인하세요.</p>
-<pre id="log">Running tests…</pre>
+  <h1>WebGL2 / OIT Diagnostic</h1>
+  <p>페이지가 로드되면 자동으로 진단을 실행합니다. 아래 결과가 각 기기에서의 WebGL2/확장·FBO 지원 상태를 직관적으로 보여줍니다.</p>
+
+  <div id="canvasWrap">
+    <canvas id="glcanvas" width="256" height="256"></canvas>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <strong>요약</strong>
+      <table>
+        <tr><th>항목</th><th>결과</th></tr>
+        <tr><td>WebGL2 컨텍스트</td><td id="res-webgl2" class="status mono">-</td></tr>
+        <tr><td>EXT_color_buffer_float</td><td id="res-ext-float" class="status mono">-</td></tr>
+        <tr><td>WEBGL_draw_buffers / EXT_draw_buffers</td><td id="res-drawbuffers" class="status mono">-</td></tr>
+        <tr><td>FRAMEBUFFER 상태</td><td id="res-fb-status" class="status mono">-</td></tr>
+        <tr><td>셰이더 컴파일/링크</td><td id="res-shader" class="status mono">-</td></tr>
+        <tr><td>픽셀 샘플 (COLOR_ATTACHMENT0)</td><td id="res-pixel" class="mono">-</td></tr>
+      </table>
+      <div class="hint">문제가 있으면 아래 콘솔과 확장 목록을 확인하세요.</div>
+    </div>
+
+    <div class="card">
+      <strong>GL 정보 / 렌더러</strong>
+      <div id="gl-info" class="small mono">-</div>
+      <div style="margin-top:8px">
+        <button id="copyBtn" class="btn">콘솔 복사</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>확장(Extensions)</strong>
+      <table id="ext-table">
+        <tr><th>확장명</th><th>지원</th></tr>
+      </table>
+      <div class="hint">확장 미노출 시 OIT(MRT/float) 구현이 불가합니다.</div>
+    </div>
+
+    <div class="card">
+      <strong>프레임버퍼 상태 해석</strong>
+      <div id="fb-interpret" class="small mono">-</div>
+    </div>
+
+    <div class="card" style="grid-column:1 / -1">
+      <strong>디버그 콘솔</strong>
+      <pre id="console">Running tests…</pre>
+    </div>
+  </div>
 
 <script>
-(async function(){
-  const logEl = id => document.getElementById(id);
+(function(){
+  const el = id => document.getElementById(id);
+  const logEl = el('console');
   function log(...args){
+    const s = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
     console.log(...args);
-    logEl('log').textContent += '\\n' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    logEl.textContent += '\\n' + s;
   }
-  function statusLabel(ok){ return ok ? '✅' : '❌'; }
+  function setText(id, text, cls){
+    const node = el(id);
+    node.textContent = text;
+    node.className = 'status mono ' + (cls||'');
+  }
+  function addExtRow(name, ok){
+    const t = el('ext-table');
+    const tr = document.createElement('tr');
+    const td1 = document.createElement('td'); td1.textContent = name;
+    const td2 = document.createElement('td'); td2.textContent = ok ? '✅' : '❌'; td2.className = ok ? 'ok' : 'no';
+    tr.appendChild(td1); tr.appendChild(td2); t.appendChild(tr);
+  }
 
-  // 1) WebGL2 컨텍스트 시도
-  const canvas = document.createElement('canvas');
-  canvas.width = 256; canvas.height = 256;
-  document.body.appendChild(canvas);
-  log('Attempting getContext(\"webgl2\")...');
+  // start
+  logEl.textContent = 'Running tests…';
+  log('Attempting getContext("webgl2")...');
+  const canvas = el('glcanvas');
   const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+
+  setText('res-webgl2', gl ? 'true' : 'false', gl ? 'ok' : 'no');
   log('webgl2 context available:', !!gl);
 
   if(!gl){
     log('FALLBACK: trying webgl (WebGL1) context...');
+    setText('gl-info', 'WebGL2 not available; try WebGL1 fallback', 'no');
     const gl1 = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
     log('webgl (1) available:', !!gl1);
+    el('fb-interpret').textContent = 'WebGL2 미지원: 폴백 필요';
     return;
   }
 
-  // 2) 기본 정보
+  // GL params
   try {
-    log('GL VERSION:', gl.getParameter(gl.VERSION));
-    log('GLSL VERSION:', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    const ver = gl.getParameter(gl.VERSION);
+    const glsl = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+    el('gl-info').textContent = 'VERSION: ' + ver + '\\nGLSL: ' + glsl;
+    log('GL VERSION:', ver);
+    log('GLSL VERSION:', glsl);
   } catch(e){ log('Could not query GL params', e); }
 
-  // 3) 확장 체크
-  const exts = {
-    EXT_color_buffer_float: !!gl.getExtension('EXT_color_buffer_float'),
-    EXT_color_buffer_half_float: !!gl.getExtension('EXT_color_buffer_half_float'),
-    WEBGL_draw_buffers: !!gl.getExtension('WEBGL_draw_buffers') || !!gl.getExtension('EXT_draw_buffers'),
-    OES_texture_float: !!gl.getExtension('OES_texture_float'),
-    OES_texture_half_float: !!gl.getExtension('OES_texture_half_float'),
-    WEBGL_debug_renderer_info: !!gl.getExtension('WEBGL_debug_renderer_info')
-  };
+  // extensions to check
+  const extsToCheck = [
+    'EXT_color_buffer_float',
+    'EXT_color_buffer_half_float',
+    'WEBGL_draw_buffers',
+    'EXT_draw_buffers',
+    'OES_texture_float',
+    'OES_texture_half_float',
+    'WEBGL_debug_renderer_info'
+  ];
+  const exts = {};
+  extsToCheck.forEach(name => {
+    try {
+      const v = !!gl.getExtension(name);
+      exts[name] = v;
+      addExtRow(name, v);
+    } catch(e){
+      exts[name] = false;
+      addExtRow(name, false);
+    }
+  });
   log('Extensions:', exts);
 
-  // 4) debug renderer info (가능하면)
+  // debug renderer info
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');
   if(dbg){
     try {
-      log('UNMASKED_VENDOR_WEBGL:', gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL));
-      log('UNMASKED_RENDERER_WEBGL:', gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+      const vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+      const renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+      el('gl-info').textContent += '\\nVENDOR: ' + vendor + '\\nRENDERER: ' + renderer;
+      log('UNMASKED_VENDOR_WEBGL:', vendor);
+      log('UNMASKED_RENDERER_WEBGL:', renderer);
     } catch(e){ log('Could not read debug renderer info', e); }
   } else {
     log('WEBGL_debug_renderer_info not available');
   }
 
-  // 5) MRT + float FBO 테스트
+  // helper: create texture safely
   function makeTexture(w,h,internalFormat,format,type){
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -81,6 +172,7 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     try {
       gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
+      log('texImage2D OK for', internalFormat, format, type);
     } catch(e){
       log('texImage2D threw', internalFormat, format, type, e);
     }
@@ -88,31 +180,35 @@
     return tex;
   }
 
+  // FBO + MRT + float test
   const w = 64, h = 64;
   const fb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
 
-  // Try create two color attachments: one RGBA8, one RGBA32F (float)
-  const tex0 = makeTexture(w,h, gl.RGBA8 || gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE);
-  const tex1_float = makeTexture(w,h, gl.RGBA32F || 0x8814 /*fallback*/, gl.RGBA, gl.FLOAT);
+  // Try create two color attachments: one RGBA8, one RGBA32F (if available)
+  // Use constants if present, otherwise fallback numeric enums
+  const RGBA8 = gl.RGBA8 || 0x8058;
+  const RGBA32F = gl.RGBA32F || 0x8814;
+  const tex0 = makeTexture(w,h, RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+  const tex1_float = makeTexture(w,h, RGBA32F, gl.RGBA, gl.FLOAT);
 
-  // Attach
   try {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1_float, 0);
+    log('Attached textures to COLOR_ATTACHMENT0/1');
   } catch(e){
     log('framebufferTexture2D attach error', e);
   }
 
-  // Try draw buffers
+  // drawBuffers
   let drawBuffersOk = false;
   try {
-    if (gl.drawBuffers) {
+    if (typeof gl.drawBuffers === 'function') {
       gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
       drawBuffersOk = true;
     } else {
       const extDB = gl.getExtension('WEBGL_draw_buffers') || gl.getExtension('EXT_draw_buffers');
-      if (extDB && extDB.drawBuffersWEBGL) {
+      if (extDB && typeof extDB.drawBuffersWEBGL === 'function') {
         extDB.drawBuffersWEBGL([extDB.COLOR_ATTACHMENT0_WEBGL, extDB.COLOR_ATTACHMENT1_WEBGL]);
         drawBuffersOk = true;
       }
@@ -120,9 +216,10 @@
   } catch(e){
     log('drawBuffers call failed', e);
   }
+  setText('res-drawbuffers', String(drawBuffersOk), drawBuffersOk ? 'ok' : 'no');
   log('drawBuffers available:', drawBuffersOk);
 
-  // Check framebuffer status
+  // framebuffer status
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   const statusMap = {
     0x8CD5: 'FRAMEBUFFER_COMPLETE',
@@ -130,35 +227,53 @@
     0x8CD7: 'FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT',
     0x8CD9: 'FRAMEBUFFER_UNSUPPORTED'
   };
-  log('Framebuffer status:', status, statusMap[status] || 'unknown');
+  const statusText = (statusMap[status] || ('UNKNOWN (0x' + status.toString(16) + ')'));
+  setText('res-fb-status', statusText, status === 0x8CD5 ? 'ok' : 'no');
+  el('fb-interpret').textContent = status === 0x8CD5
+    ? 'FRAMEBUFFER_COMPLETE: 해당 FBO 조합(RGBA8 + RGBA32F 등)이 지원됩니다.'
+    : '프레임버퍼 불완전: 특정 텍스처 포맷(MRT/float) 조합이 지원되지 않을 수 있습니다.';
 
-  // 6) 간단한 렌더 테스트 (clear to different colors on attachments)
-  // Create minimal shader that writes to gl_FragData[0] and [1] if MRT available
+  log('Framebuffer status:', status, statusText);
+
+  // Minimal MRT shader (GLSL ES 3.00)
   const vsSrc = `#version 300 es
   in vec2 aPos;
   void main(){ gl_Position = vec4(aPos,0.0,1.0); }`;
   const fsSrc = `#version 300 es
   precision highp float;
-  out vec4 out0;
-  out vec4 out1;
+  layout(location = 0) out vec4 out0;
+  layout(location = 1) out vec4 out1;
   void main(){
-    out0 = vec4(1.0, 0.0, 0.0, 1.0); // red
-    out1 = vec4(0.0, 1.0, 0.0, 1.0); // green
+    out0 = vec4(1.0, 0.0, 0.0, 1.0);
+    out1 = vec4(0.0, 1.0, 0.0, 1.0);
   }`;
   let programOk = false;
   try {
     const vs = gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vs, vsSrc); gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      log('Vertex shader compile error:', gl.getShaderInfoLog(vs));
+      throw new Error('VS compile failed');
+    }
     const fs = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      const msg = gl.getShaderInfoLog(fs);
+      log('Fragment shader compile error:', msg);
+      setText('res-shader', 'Fragment shader compile failed', 'no');
+      throw new Error('FS compile failed: ' + msg);
+    }
     const prog = gl.createProgram();
     gl.attachShader(prog, vs); gl.attachShader(prog, fs);
     gl.bindAttribLocation(prog, 0, 'aPos');
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      log('Program link failed:', gl.getProgramInfoLog(prog));
+      const info = gl.getProgramInfoLog(prog);
+      log('Program link failed:', info);
+      setText('res-shader', 'Program link failed', 'no');
     } else {
       programOk = true;
+      setText('res-shader', 'OK', 'ok');
       gl.useProgram(prog);
       const vao = gl.createVertexArray();
       gl.bindVertexArray(vao);
@@ -174,24 +289,30 @@
     }
   } catch(e){
     log('Shader/MRT render error', e);
+    if (!programOk) setText('res-shader', 'Failed', 'no');
   }
 
-  // 7) Try readPixels from COLOR_ATTACHMENT0 (RGBA8) to verify rendering pipeline
+  // readPixels from COLOR_ATTACHMENT0
   try {
     const readBuf = new Uint8Array(w*h*4);
-    gl.readBuffer ? gl.readBuffer(gl.COLOR_ATTACHMENT0) : null;
+    // readBuffer may not exist; try if available
+    if (typeof gl.readBuffer === 'function') {
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    } else {
+      // if using extension, nothing to do here
+    }
     gl.readPixels(0,0,w,h,gl.RGBA, gl.UNSIGNED_BYTE, readBuf);
-    // sample center pixel
     const idx = ((Math.floor(h/2)*w) + Math.floor(w/2)) * 4;
-    log('Center pixel RGBA (uint8) from COLOR_ATTACHMENT0:', readBuf[idx], readBuf[idx+1], readBuf[idx+2], readBuf[idx+3]);
+    const r = readBuf[idx], g = readBuf[idx+1], b = readBuf[idx+2], a = readBuf[idx+3];
+    const pixelText = `${r} ${g} ${b} ${a}`;
+    el('res-pixel').textContent = pixelText;
+    log('Center pixel RGBA (uint8) from COLOR_ATTACHMENT0:', r, g, b, a);
   } catch(e){
     log('readPixels failed or not allowed:', e);
+    el('res-pixel').textContent = 'readPixels failed';
   }
 
-  // 8) Cleanup
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-  // 9) Summary hints
+  // final hints
   log('\\n--- Quick interpretation hints ---');
   log('If webgl2=false -> WebGL2 자체 미지원 (폴백 필요).');
   log('If EXT_color_buffer_float=false -> float FBO 기반 OIT 불가.');
@@ -199,8 +320,20 @@
   log('If framebuffer status != FRAMEBUFFER_COMPLETE -> 해당 FBO 조합(예: RGBA32F + MRT) 미지원.');
   log('If shader link or render failed -> GLSL ES 3.00 / MRT 지원 문제 가능.');
   log('If readPixels returns expected color -> basic render pipeline 정상.');
-
   log('\\nDone. Copy console output and paste it back for analysis.');
+
+  // populate summary fields
+  setText('res-ext-float', String(!!exts['EXT_color_buffer_float']), exts['EXT_color_buffer_float'] ? 'ok' : 'no');
+
+  // copy button
+  el('copyBtn').addEventListener('click', () => {
+    navigator.clipboard.writeText(logEl.textContent).then(()=> {
+      alert('콘솔 로그가 클립보드에 복사되었습니다.');
+    }).catch(()=> alert('복사 실패: 브라우저 권한 필요'));
+  });
+
+  // cleanup binding
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 })();
 </script>
 </body>
