@@ -3,16 +3,42 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>WebGL2 OIT Deep Diagnostic</title>
+<title>WebGL2 OIT Deep Diagnostic - Single File</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #1a1a1a; line-height: 1.6; background: #f5f5f7; }
-  h3 { margin-top: 0; color: #000; }
-  pre { background: #fff; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; border: 1px solid #e0e0e0; white-space: pre-wrap; word-break: break-all; }
-  .section { background: #fff; padding: 16px; margin: 12px 0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  * { box-sizing: border-box; }
+  body { 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+    padding: 16px; 
+    color: #1a1a1a; 
+    line-height: 1.6; 
+    background: #f5f5f7;
+    margin: 0;
+  }
+  h3 { margin-top: 0; color: #000; font-size: 18px; }
+  pre { 
+    background: #fff; 
+    padding: 12px; 
+    border-radius: 8px; 
+    overflow-x: auto; 
+    font-size: 11px; 
+    border: 1px solid #e0e0e0; 
+    white-space: pre-wrap; 
+    word-break: break-all;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .section { 
+    background: #fff; 
+    padding: 16px; 
+    margin: 12px 0; 
+    border-radius: 12px; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+  }
   .ok { color: #34c759; font-weight: 600; }
   .no { color: #ff3b30; font-weight: 600; }
   .warn { color: #ff9500; font-weight: 600; }
   .info { color: #007aff; font-weight: 600; }
+  .critical { color: #ff3b30; font-weight: 700; background: #ffe5e5; padding: 2px 6px; border-radius: 4px; }
   table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
   td, th { border: 1px solid #e0e0e0; padding: 8px; text-align: left; }
   th { background: #f8f8f8; font-weight: 600; }
@@ -20,73 +46,133 @@
   .test-pass { background: #d4edda; color: #155724; }
   .test-fail { background: #f8d7da; color: #721c24; }
   .test-warn { background: #fff3cd; color: #856404; }
-  button { background: #007aff; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; margin: 8px 0; }
+  button { 
+    background: #007aff; 
+    color: white; 
+    border: none; 
+    padding: 12px 24px; 
+    border-radius: 8px; 
+    font-size: 16px; 
+    cursor: pointer; 
+    margin: 8px 0;
+    width: 100%;
+  }
   button:active { opacity: 0.8; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
   #canvas-container { display: none; }
+  .summary-box { 
+    background: #f0f0f0; 
+    padding: 12px; 
+    border-radius: 8px; 
+    margin: 8px 0;
+    border-left: 4px solid #007aff;
+  }
+  .error-box {
+    background: #ffe5e5;
+    border-left-color: #ff3b30;
+  }
+  .success-box {
+    background: #e5f5e5;
+    border-left-color: #34c759;
+  }
 </style>
 </head>
 <body>
 <h3>🧪 WebGL2 OIT Deep Diagnostic</h3>
-<p>iOS 17.7.1 vs 18.6.2 OIT 호환성 문제 특화 진단. 자동 실행되며, Babylon.js OIT의 실제 동작을 시뮬레이션합니다.</p>
+<p>iOS 17.7.1 vs 18.6.2 호환성 문제 특화 탐지<br>
+<code>gl.blendFunci</code> 미지원 및 기타 iOS WebGL2 제한사항 검출</p>
 
 <div class="section">
-  <strong>진행 상태:</strong> <span id="status">대기중...</span>
-  <div id="progress" style="margin-top: 8px; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden;">
-    <div style="width: 0%; height: 100%; background: #007aff; transition: width 0.3s;"></div>
+  <strong>상태:</strong> <span id="status">준비됨 - 아래 버튼을 눌러 시작</span>
+  <div id="progress-container" style="margin-top: 8px; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden; display: none;">
+    <div id="progress-bar" style="width: 0%; height: 100%; background: #007aff; transition: width 0.3s;"></div>
   </div>
 </div>
 
-<pre id="log">Initializing...</pre>
+<button id="start-btn" onclick="runDiagnostics()">🔍 진단 시작</button>
+<button id="copy-btn" onclick="copyResults()" style="display: none; background: #34c759;">📋 결과 복사</button>
+
+<pre id="log">결과가 여기에 표시됩니다...</pre>
+
+<div id="summary" style="display: none;"></div>
 
 <div id="canvas-container"></div>
 
 <script>
-(function() {
+// 진단 결과 저장
+let finalResults = {};
+let logText = '';
+
+function updateStatus(msg) {
+  document.getElementById('status').textContent = msg;
+  console.log('[Status]', msg);
+}
+
+function setProgress(pct) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+function log(title, ...args) {
+  const timestamp = new Date().toLocaleTimeString();
+  const content = args.map(a => {
+    if (a === null) return 'null';
+    if (a === undefined) return 'undefined';
+    if (typeof a === 'object') return JSON.stringify(a);
+    return String(a);
+  }).join(' ');
+  
+  const line = `[${timestamp}] ${title} ${content}`;
+  console.log(line);
+  
   const logEl = document.getElementById('log');
-  const statusEl = document.getElementById('status');
-  const progressEl = document.querySelector('#progress div');
+  logEl.textContent += (logEl.textContent ? '\n' : '') + line;
+  logText += line + '\n';
   
-  function setProgress(pct) {
-    progressEl.style.width = pct + '%';
-  }
+  // 자동 스크롤
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function resultLabel(ok, text) {
+  return ok ? '✅ ' + text : '❌ ' + text;
+}
+
+function showSummary(html, type = 'info') {
+  const summary = document.getElementById('summary');
+  summary.innerHTML = html;
+  summary.className = 'section summary-box ' + (type === 'error' ? 'error-box' : type === 'success' ? 'success-box' : '');
+  summary.style.display = 'block';
+}
+
+async function runDiagnostics() {
+  const startBtn = document.getElementById('start-btn');
+  const copyBtn = document.getElementById('copy-btn');
+  const progressContainer = document.getElementById('progress-container');
   
-  function updateStatus(msg) {
-    statusEl.textContent = msg;
-    console.log('[Status]', msg);
-  }
+  startBtn.disabled = true;
+  startBtn.textContent = '⏳ 테스트 진행중...';
+  progressContainer.style.display = 'block';
   
-  function log(title, ...args) {
-    const line = '[' + new Date().toLocaleTimeString() + '] ' + title + ' ' + args.map(a => {
-      if (a === null) return 'null';
-      if (a === undefined) return 'undefined';
-      if (typeof a === 'object') return JSON.stringify(a);
-      return String(a);
-    }).join(' ');
-    console.log(line);
-    logEl.textContent += '\n' + line;
-    logEl.scrollTop = logEl.scrollHeight;
-  }
+  // 로그 초기화
+  document.getElementById('log').textContent = '';
+  logText = '';
+  document.getElementById('summary').style.display = 'none';
   
-  function resultLabel(ok, text) {
-    const cls = ok ? 'test-pass' : 'test-fail';
-    const icon = ok ? '✓' : '✗';
-    return `<span class="test-result ${cls}">${icon} ${text}</span>`;
-  }
-  
-  // Test state
+  // 결과 객체 초기화
   const results = {
     webgl2: false,
+    userAgent: navigator.userAgent,
     extensions: {},
-    floatFBO: { rgba32f: false, rgba16f: false, rg32f: false, rg16f: false },
-    mrt: { basic: false, float: false, mixed: false },
-    depthStencil: { withFloat: false, withoutDepth: false },
-    blit: { floatToByte: false, floatToFloat: false },
-    readback: { float: false, halfFloat: false },
-    babylonOITSim: false
+    blendFunctions: {},
+    floatFBO: {},
+    mrt: {},
+    depthStencil: {},
+    blit: {},
+    oit: {},
+    timestamp: new Date().toISOString()
   };
-
-  async function runTests() {
-    updateStatus('WebGL2 컨텍스트 생성 중...');
+  
+  try {
+    updateStatus('WebGL2 컨텍스트 생성...');
     setProgress(5);
     
     const canvas = document.createElement('canvas');
@@ -104,30 +190,70 @@
       log('FATAL', 'WebGL2 not supported');
       log('FALLBACK', 'Trying WebGL1...');
       const gl1 = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      log('WEBGL1', gl1 ? 'Available (OIT impossible)' : 'Not available');
-      updateStatus('WebGL2 미지원 - 테스트 중단');
-      setProgress(100);
+      const hasGL1 = !!gl1;
+      log('WEBGL1', hasGL1 ? 'Available (OIT impossible)' : 'Not available');
+      
+      showSummary(`
+        <strong>❌ WebGL2 미지원</strong><br>
+        이 기기/브라우저는 WebGL2를 지원하지 않습니다.<br>
+        WebGL1: ${hasGL1 ? '지원됨 (OIT 불가능)' : '미지원'}<br>
+        <br>
+        <strong>해결책:</strong> iOS 15+ Safari 또는 최신 Chrome/Edge 사용
+      `, 'error');
+      
+      finalResults = results;
+      startBtn.disabled = false;
+      startBtn.textContent = '🔍 다시 시도';
       return;
     }
     
     results.webgl2 = true;
-    log('WEBGL2', 'Context created successfully');
+    log('SUCCESS', 'WebGL2 context created');
+    
+    // 기본 정보
+    log('\n=== BASIC INFO ===');
     log('VERSION', gl.getParameter(gl.VERSION));
     log('VENDOR', gl.getParameter(gl.VENDOR));
     log('RENDERER', gl.getParameter(gl.RENDERER));
     log('SL_VERSION', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
     log('MAX_TEXTURE_SIZE', gl.getParameter(gl.MAX_TEXTURE_SIZE));
-    log('MAX_RENDERBUFFER_SIZE', gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
     log('MAX_DRAW_BUFFERS', gl.getParameter(gl.MAX_DRAW_BUFFERS));
     log('MAX_COLOR_ATTACHMENTS', gl.getParameter(gl.MAX_COLOR_ATTACHMENTS));
     
-    // Extensions
-    updateStatus('확장 기능 검사 중...');
-    setProgress(15);
+    // Blend 함수 가용성 (CRITICAL)
+    updateStatus('Blend 함수 가용성 검사...');
+    setProgress(10);
     
+    log('\n=== BLEND FUNCTIONS (CRITICAL FOR OIT) ===');
+    results.blendFunctions = {
+      blendFunc: typeof gl.blendFunc === 'function',
+      blendFuncSeparate: typeof gl.blendFuncSeparate === 'function',
+      blendFunci: typeof gl.blendFunci === 'function',
+      blendEquation: typeof gl.blendEquation === 'function',
+      blendEquationSeparate: typeof gl.blendEquationSeparate === 'function'
+    };
+    
+    for (const [name, available] of Object.entries(results.blendFunctions)) {
+      const isCritical = name === 'blendFunci';
+      const marker = isCritical && !available ? '🔴' : (available ? '🟢' : '🟡');
+      log('BLEND', marker, name, available ? 'AVAILABLE' : 'MISSING', isCritical && !available ? '[CRITICAL FOR OIT]' : '');
+    }
+    
+    if (!results.blendFunctions.blendFunci) {
+      log('WARNING', 'gl.blendFunci not available!');
+      log('IMPACT', 'Per-draw-buffer blending impossible');
+      log('IMPACT', 'Standard one-pass Weighted Blended OIT will FAIL');
+      log('WORKAROUND', 'Must use two-pass OIT or alternative method');
+    }
+    
+    // Extensions
+    updateStatus('확장 기능 검사...');
+    setProgress(20);
+    
+    log('\n=== EXTENSIONS ===');
     const extList = [
       'EXT_color_buffer_float',
-      'EXT_color_buffer_half_float', 
+      'EXT_color_buffer_half_float',
       'WEBGL_draw_buffers',
       'OES_texture_float_linear',
       'OES_texture_half_float_linear',
@@ -137,20 +263,23 @@
       'OES_texture_half_float'
     ];
     
-    extList.forEach(name => {
+    for (const name of extList) {
       const ext = gl.getExtension(name);
       results.extensions[name] = !!ext;
-      log('EXT', name, resultLabel(!!ext, ext ? 'OK' : 'MISSING'));
-    });
-    
-    // Debug info
-    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-    if (dbg) {
-      log('GPU_VENDOR', gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL));
-      log('GPU_RENDERER', gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+      log('EXT', name, ext ? '✅' : '❌');
     }
     
-    // Helper functions
+    // GPU 정보
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    if (dbg) {
+      log('\n=== GPU INFO ===');
+      log('UNMASKED_VENDOR', gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL));
+      log('UNMASKED_RENDERER', gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+      results.gpuVendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+      results.gpuRenderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+    }
+    
+    // Helper
     function createTexture(w, h, internalFormat, format, type) {
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -163,7 +292,7 @@
       return tex;
     }
     
-    function checkFBOStatus(label) {
+    function checkFBO(label) {
       const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       const map = {
         0x8CD5: 'COMPLETE',
@@ -172,227 +301,214 @@
         0x8CD9: 'UNSUPPORTED',
         0x8D56: 'INCOMPLETE_MULTISAMPLE'
       };
-      const statusStr = map[status] || ('0x' + status.toString(16));
-      log('FBO_STATUS', label, statusStr, status === gl.FRAMEBUFFER_COMPLETE ? resultLabel(true, 'OK') : resultLabel(false, 'FAIL'));
-      return status === gl.FRAMEBUFFER_COMPLETE;
+      const str = map[status] || `0x${status.toString(16)}`;
+      const ok = status === gl.FRAMEBUFFER_COMPLETE;
+      log('FBO', label, str, ok ? '✅' : '❌');
+      return ok;
     }
     
-    // Test 1: Single Float FBO (no MRT)
-    updateStatus('단일 Float FBO 테스트...');
-    setProgress(25);
+    // Test 1: Float FBO 단일
+    updateStatus('Float FBO 테스트...');
+    setProgress(30);
     
-    log('\n--- TEST 1: Single Float FBO ---');
+    log('\n=== TEST 1: Single Float FBO ===');
     
     const formats = [
-      { name: 'RGBA32F', internal: gl.RGBA32F, format: gl.RGBA, type: gl.FLOAT },
-      { name: 'RGBA16F', internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT },
-      { name: 'RG32F', internal: gl.RG32F, format: gl.RG, type: gl.FLOAT },
-      { name: 'RG16F', internal: gl.RG16F, format: gl.RG, type: gl.HALF_FLOAT }
+      { key: 'rgba32f', name: 'RGBA32F', internal: gl.RGBA32F, format: gl.RGBA, type: gl.FLOAT, needExt: 'EXT_color_buffer_float' },
+      { key: 'rgba16f', name: 'RGBA16F', internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, needExt: 'EXT_color_buffer_half_float' },
+      { key: 'rg32f', name: 'RG32F', internal: gl.RG32F, format: gl.RG, type: gl.FLOAT, needExt: 'EXT_color_buffer_float' },
+      { key: 'rg16f', name: 'RG16F', internal: gl.RG16F, format: gl.RG, type: gl.HALF_FLOAT, needExt: 'EXT_color_buffer_half_float' }
     ];
     
-    formats.forEach(fmt => {
+    for (const fmt of formats) {
+      if (!results.extensions[fmt.needExt]) {
+        log('SKIP', fmt.name, 'extension not available');
+        results.floatFBO[fmt.key] = false;
+        continue;
+      }
+      
       const fb = gl.createFramebuffer();
       const tex = createTexture(64, 64, fmt.internal, fmt.format, fmt.type);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-      
-      // iOS 17 특수 케이스: depth 없이 float만 있으면 incomplete?
-      const ok = checkFBOStatus(fmt.name);
-      results.floatFBO[fmt.name.toLowerCase()] = ok;
+      results.floatFBO[fmt.key] = checkFBO(fmt.name);
       
       gl.deleteFramebuffer(fb);
       gl.deleteTexture(tex);
-    });
-    
-    // Test 2: MRT with different combinations
-    updateStatus('MRT (다중 렌더 타겟) 테스트...');
-    setProgress(40);
-    
-    log('\n--- TEST 2: MRT Combinations ---');
-    
-    // 2.1 Basic MRT (RGBA8 + RGBA8)
-    {
-      const fb = gl.createFramebuffer();
-      const tex0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      const tex1 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-      results.mrt.basic = checkFBOStatus('MRT RGBA8+RGBA8');
-      gl.deleteFramebuffer(fb);
-      gl.deleteTexture(tex0);
-      gl.deleteTexture(tex1);
     }
     
-    // 2.2 MRT with Float (RGBA8 + RGBA32F) - Babylon OIT pattern
-    if (results.extensions['EXT_color_buffer_float']) {
+    // Test 2: MRT
+    updateStatus('MRT (다중 렌더 타겟) 테스트...');
+    setProgress(45);
+    
+    log('\n=== TEST 2: Multiple Render Targets ===');
+    
+    // 2.1 RGBA8+RGBA8
+    {
       const fb = gl.createFramebuffer();
-      const tex0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      const tex1 = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      const t0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const t1 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, t1, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-      results.mrt.float = checkFBOStatus('MRT RGBA8+RGBA32F');
+      results.mrt.rgba8_rgba8 = checkFBO('MRT RGBA8+RGBA8');
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(t0);
+      gl.deleteTexture(t1);
+    }
+    
+    // 2.2 RGBA8+RGBA32F (Babylon OIT 패턴)
+    if (results.extensions['EXT_color_buffer_float'] && results.floatFBO.rgba32f) {
+      const fb = gl.createFramebuffer();
+      const t0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const t1 = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, t1, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      results.mrt.rgba8_rgba32f = checkFBO('MRT RGBA8+RGBA32F');
       
-      if (results.mrt.float) {
-        // Try rendering to it
-        log('RENDER_TEST', 'Attempting MRT shader compile...');
-        const vs = `#version 300 es
+      if (results.mrt.rgba8_rgba32f) {
+        // 렌더링 테스트
+        log('RENDER', 'Testing MRT shader...');
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(vs, `#version 300 es
           in vec2 aPos;
-          void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
-        const fs = `#version 300 es
+          void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`);
+        gl.shaderSource(fs, `#version 300 es
           precision highp float;
-          layout(location = 0) out vec4 out0;
-          layout(location = 1) out vec4 out1;
+          layout(location=0) out vec4 out0;
+          layout(location=1) out vec4 out1;
           void main() {
             out0 = vec4(1.0, 0.0, 0.0, 0.5);
             out1 = vec4(0.0, 1.0, 0.0, 0.5);
-          }`;
+          }`);
+        gl.compileShader(vs);
+        gl.compileShader(fs);
         
-        const vShader = gl.createShader(gl.VERTEX_SHADER);
-        const fShader = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(vShader, vs);
-        gl.shaderSource(fShader, fs);
-        gl.compileShader(vShader);
-        gl.compileShader(fShader);
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
         
-        if (!gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) {
-          log('FS_COMPILE', 'Failed:', gl.getShaderInfoLog(fShader));
-          results.mrt.float = false;
-        } else {
-          const prog = gl.createProgram();
-          gl.attachShader(prog, vShader);
-          gl.attachShader(prog, fShader);
-          gl.linkProgram(prog);
+        if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+          gl.useProgram(prog);
+          const vao = gl.createVertexArray();
+          gl.bindVertexArray(vao);
+          const vbo = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+          gl.enableVertexAttribArray(0);
+          gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+          gl.viewport(0, 0, 64, 64);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
           
-          if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-            log('PROGRAM_LINK', 'Failed:', gl.getProgramInfoLog(prog));
-            results.mrt.float = false;
-          } else {
-            gl.useProgram(prog);
-            const vao = gl.createVertexArray();
-            gl.bindVertexArray(vao);
-            const vbo = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-            gl.enableVertexAttribArray(0);
-            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-            gl.viewport(0, 0, 64, 64);
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-            
-            // Check if it actually rendered
-            gl.readBuffer(gl.COLOR_ATTACHMENT0);
-            const buf0 = new Uint8Array(4);
-            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf0);
-            log('READBACK_RGBA8', 'Pixel:', Array.from(buf0));
-            
-            gl.readBuffer(gl.COLOR_ATTACHMENT1);
-            const buf1 = new Float32Array(4);
-            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, buf1);
-            log('READBACK_RGBA32F', 'Pixel:', Array.from(buf1).map(v => v.toFixed(2)));
-            
-            const rendered = buf0[0] > 200; // Should be red (255, 0, 0, 128)
-            log('RENDER_OK', resultLabel(rendered, rendered ? 'Pixels written' : 'No pixels'));
-          }
+          // Readback
+          gl.readBuffer(gl.COLOR_ATTACHMENT0);
+          const b0 = new Uint8Array(4);
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b0);
+          log('READBACK', 'RGBA8:', Array.from(b0));
+          
+          gl.readBuffer(gl.COLOR_ATTACHMENT1);
+          const b1 = new Float32Array(4);
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, b1);
+          log('READBACK', 'RGBA32F:', Array.from(b1).map(v => v.toFixed(2)));
+          
+          results.mrt.renderSuccess = (b0[0] > 200);
+          log('MRT_RENDER', results.mrt.renderSuccess ? '✅ Shader wrote to both targets' : '❌ Render failed');
+        } else {
+          log('MRT_SHADER', '❌ Link failed:', gl.getProgramInfoLog(prog));
+          results.mrt.renderSuccess = false;
         }
       }
       
       gl.deleteFramebuffer(fb);
-      gl.deleteTexture(tex0);
-      gl.deleteTexture(tex1);
+      gl.deleteTexture(t0);
+      gl.deleteTexture(t1);
+    } else {
+      log('SKIP', 'MRT RGBA8+RGBA32F (float not available)');
+      results.mrt.rgba8_rgba32f = false;
     }
     
-    // 2.3 Mixed precision MRT
+    // 2.3 RGBA16F+RGBA16F
     if (results.extensions['EXT_color_buffer_half_float']) {
       const fb = gl.createFramebuffer();
-      const tex0 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
-      const tex1 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
+      const t0 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
+      const t1 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, t1, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-      results.mrt.mixed = checkFBOStatus('MRT RGBA16F+RGBA16F');
+      results.mrt.rgba16f_rgba16f = checkFBO('MRT RGBA16F+RGBA16F');
       gl.deleteFramebuffer(fb);
-      gl.deleteTexture(tex0);
-      gl.deleteTexture(tex1);
+      gl.deleteTexture(t0);
+      gl.deleteTexture(t1);
     }
     
-    // Test 3: Depth/Stencil with Float
-    updateStatus('깊이/스텐실 버퍼 조합 테스트...');
+    // Test 3: Depth 조합
+    updateStatus('Depth/Stencil 조합 테스트...');
     setProgress(60);
     
-    log('\n--- TEST 3: Depth/Stencil Attachment ---');
+    log('\n=== TEST 3: Depth/Stencil Combinations ===');
     
-    // 3.1 Float + Depth24_Stencil8
-    {
+    // Float + Depth24_Stencil8
+    if (results.floatFBO.rgba32f) {
       const fb = gl.createFramebuffer();
       const color = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
       const depth = gl.createRenderbuffer();
       gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
       gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, 64, 64);
-      
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
       gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, depth);
-      
-      results.depthStencil.withFloat = checkFBOStatus('RGBA32F + DEPTH24_STENCIL8');
-      
+      results.depthStencil.float32_depth24stencil8 = checkFBO('RGBA32F + DEPTH24_STENCIL8');
       gl.deleteFramebuffer(fb);
       gl.deleteTexture(color);
       gl.deleteRenderbuffer(depth);
     }
     
-    // 3.2 Float only (no depth) - iOS 17 might reject this
-    {
+    // Float only (no depth) - iOS 17 특수 케이스
+    if (results.floatFBO.rgba32f) {
       const fb = gl.createFramebuffer();
       const color = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
-      
-      results.depthStencil.withoutDepth = checkFBOStatus('RGBA32F only (no depth)');
-      
+      results.depthStencil.float32_only = checkFBO('RGBA32F only (no depth)');
       gl.deleteFramebuffer(fb);
       gl.deleteTexture(color);
     }
     
-    // Test 4: Blit operations (Babylon OIT uses this)
-    updateStatus('Blit/Copy 작업 테스트...');
+    // Test 4: Blit
+    updateStatus('BlitFramebuffer 테스트...');
     setProgress(75);
     
-    log('\n--- TEST 4: BlitFramebuffer ---');
+    log('\n=== TEST 4: Blit Operations ===');
     
-    if (results.mrt.float) {
-      // Create source FBO with float
+    if (results.mrt.rgba8_rgba32f) {
       const srcFb = gl.createFramebuffer();
       const srcTex = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
       gl.bindFramebuffer(gl.FRAMEBUFFER, srcFb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, srcTex, 0);
+      gl.clearColor(0, 1, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       
-      // Create dest FBO with byte
       const dstFb = gl.createFramebuffer();
       const dstTex = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       gl.bindFramebuffer(gl.FRAMEBUFFER, dstFb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
       
-      // Clear source to green
-      gl.bindFramebuffer(gl.FRAMEBUFFER, srcFb);
-      gl.clearColor(0, 1, 0, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      
-      // Try blit
       try {
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, srcFb);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dstFb);
         gl.blitFramebuffer(0, 0, 64, 64, 0, 0, 64, 64, gl.COLOR_BUFFER_BIT, gl.NEAREST);
         
-        // Check dest
         gl.bindFramebuffer(gl.FRAMEBUFFER, dstFb);
         const buf = new Uint8Array(4);
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        results.blit.floatToByte = (buf[1] > 200); // Green channel
-        log('BLIT_FLOAT_TO_BYTE', resultLabel(results.blit.floatToByte, results.blit.floatToByte ? 'Success' : 'Failed'), 'Pixel:', Array.from(buf));
+        results.blit.floatToByte = (buf[1] > 200);
+        log('BLIT', 'Float->Byte:', results.blit.floatToByte ? '✅' : '❌', 'Pixel:', Array.from(buf));
       } catch(e) {
         log('BLIT_ERROR', e.message);
         results.blit.floatToByte = false;
@@ -403,190 +519,200 @@
       gl.deleteTexture(srcTex);
       gl.deleteTexture(dstTex);
     } else {
-      log('BLIT_SKIP', 'MRT float not available, skipping blit test');
+      log('SKIP', 'Blit test (float MRT unavailable)');
     }
     
-    // Test 5: Babylon.js OIT Simulation
-    updateStatus('Babylon.js OIT 시뮬레이션...');
+    // Test 5: OIT 시뮬레이션
+    updateStatus('OIT 시뮬레이션...');
     setProgress(90);
     
-    log('\n--- TEST 5: Babylon OIT Simulation ---');
+    log('\n=== TEST 5: OIT Simulation ===');
     
-    // Babylon OIT creates:
-    // 1. MultiRenderTarget with:
-    //    - textureCount: 2 (color + depth for OIT)
-    //    - types: [Engine.TEXTURETYPE_HALF_FLOAT, Engine.TEXTURETYPE_HALF_FLOAT] or FLOAT
-    //    - formats: [Engine.TEXTUREFORMAT_RGBA, Engine.TEXTUREFORMAT_RGBA]
-    // 2. Uses drawBuffers
-    // 3. Uses blend equations for OIT accumulation
-    
-    if (!results.extensions['EXT_color_buffer_float'] && !results.extensions['EXT_color_buffer_half_float']) {
-      log('OIT_FAIL', 'No float buffer support');
-      results.babylonOITSim = false;
-    } else if (!results.mrt.basic) {
-      log('OIT_FAIL', 'MRT not supported');
-      results.babylonOITSim = false;
-    } else {
-      // Try to create Babylon-like OIT setup
-      const useHalf = results.extensions['EXT_color_buffer_half_float'] && results.mrt.mixed;
-      const useFloat = results.extensions['EXT_color_buffer_float'] && results.mrt.float;
+    // blendFunci 없는 경우 (iOS) - Two-pass workaround 테스트
+    if (!results.blendFunctions.blendFunci) {
+      log('MODE', 'Two-pass OIT (blendFunci unavailable)');
       
-      const type = useHalf ? 'HALF_FLOAT' : (useFloat ? 'FLOAT' : 'NONE');
-      log('OIT_MODE', 'Attempting with', type);
-      
-      if (type === 'NONE') {
-        results.babylonOITSim = false;
+      if (!results.mrt.rgba8_rgba32f && !results.mrt.rgba16f_rgba16f) {
+        log('OIT_FAIL', 'No suitable MRT format available');
+        results.oit.possible = false;
       } else {
-        const fb = gl.createFramebuffer();
+        const useHalf = results.mrt.rgba16f_rgba16f;
         const internalFmt = useHalf ? gl.RGBA16F : gl.RGBA32F;
-        const texType = useHalf ? gl.HALF_FLOAT : gl.FLOAT;
+        const pixelType = useHalf ? gl.HALF_FLOAT : gl.FLOAT;
         
-        // Accumulation texture
-        const accumTex = createTexture(256, 256, internalFmt, gl.RGBA, texType);
-        // Revealage texture  
-        const revealTex = createTexture(256, 256, internalFmt, gl.RGBA, texType);
+        const fb = gl.createFramebuffer();
+        const accumTex = createTexture(128, 128, internalFmt, gl.RGBA, pixelType);
+        const revealTex = createTexture(128, 128, internalFmt, gl.RGBA, pixelType);
         
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTex, 0);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, revealTex, 0);
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
         
-        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-          log('OIT_FBO_FAIL', 'Incomplete');
-          results.babylonOITSim = false;
-        } else {
-          // Try OIT blend setup
+        // Pass 1: Accumulation only
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTex, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+        
+        if (checkFBO('Pass 1: Accum only')) {
           gl.enable(gl.BLEND);
-          // Weighted blended OIT: accum uses (1, 1, 1, 1) blend, reveal uses (0, 0, 0, 1-srcAlpha)
-          // But first just test if we can clear and readback
+          gl.blendFunc(gl.ONE, gl.ONE); // Global blend
           gl.clearColor(0, 0, 0, 0);
           gl.clear(gl.COLOR_BUFFER_BIT);
           
-          // Draw something with alpha
-          const vs = `#version 300 es
+          // Draw
+          const vs = gl.createShader(gl.VERTEX_SHADER);
+          const fs = gl.createShader(gl.FRAGMENT_SHADER);
+          gl.shaderSource(vs, `#version 300 es
             in vec2 aPos;
-            void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
-          const fs = `#version 300 es
+            void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`);
+          gl.shaderSource(fs, `#version 300 es
             precision highp float;
-            layout(location = 0) out vec4 accum;
-            layout(location = 1) out float reveal;
-            void main() {
-              accum = vec4(1.0, 0.0, 0.0, 0.5); // premultiplied alpha
-              reveal = 0.5;
-            }`;
-          
+            layout(location=0) out vec4 accum;
+            void main() { accum = vec4(1.0, 0.5, 0.0, 0.8); }`);
+          gl.compileShader(vs);
+          gl.compileShader(fs);
           const prog = gl.createProgram();
-          const vsObj = gl.createShader(gl.VERTEX_SHADER);
-          const fsObj = gl.createShader(gl.FRAGMENT_SHADER);
-          gl.shaderSource(vsObj, vs);
-          gl.shaderSource(fsObj, fs);
-          gl.compileShader(vsObj);
-          gl.compileShader(fsObj);
-          gl.attachShader(prog, vsObj);
-          gl.attachShader(prog, fsObj);
+          gl.attachShader(prog, vs);
+          gl.attachShader(prog, fs);
           gl.linkProgram(prog);
+          gl.useProgram(prog);
           
-          if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-            gl.useProgram(prog);
-            const vao = gl.createVertexArray();
-            gl.bindVertexArray(vao);
-            const vbo = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-            gl.enableVertexAttribArray(0);
-            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-            
-            // OIT requires special blend state
-            gl.blendFunci(0, gl.ONE, gl.ONE); // accum: add
-            gl.blendFunci(1, gl.ZERO, gl.ONE_MINUS_SRC_COLOR); // reveal
-            
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-            
-            // Readback
-            gl.readBuffer(gl.COLOR_ATTACHMENT0);
-            const accumBuf = useHalf ? new Uint16Array(4) : new Float32Array(4);
-            gl.readPixels(0, 0, 1, 1, gl.RGBA, useHalf ? gl.HALF_FLOAT : gl.FLOAT, accumBuf);
-            
-            gl.readBuffer(gl.COLOR_ATTACHMENT1);
-            const revealBuf = useHalf ? new Uint16Array(4) : new Float32Array(4);
-            gl.readPixels(0, 0, 1, 1, gl.RGBA, useHalf ? gl.HALF_FLOAT : gl.FLOAT, revealBuf);
-            
-            log('OIT_READBACK', 'Accum:', Array.from(accumBuf), 'Reveal:', Array.from(revealBuf));
-            
-            // Check if values are reasonable (not zero, not NaN)
-            const valid = accumBuf[0] > 0 || accumBuf[1] > 0 || accumBuf[2] > 0;
-            results.babylonOITSim = valid;
-            log('OIT_RESULT', resultLabel(valid, valid ? 'Working' : 'Failed'));
-          } else {
-            log('OIT_SHADER_FAIL', gl.getProgramInfoLog(prog));
-            results.babylonOITSim = false;
-          }
+          const vao = gl.createVertexArray();
+          gl.bindVertexArray(vao);
+          const vbo = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+          gl.enableVertexAttribArray(0);
+          gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          
+          // Check
+          gl.readBuffer(gl.COLOR_ATTACHMENT0);
+          const buf = useHalf ? new Uint16Array(4) : new Float32Array(4);
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, pixelType, buf);
+          const val = useHalf ? buf[0] : buf[0];
+          const success = useHalf ? (val > 0) : (val > 0.5);
+          log('PASS1', success ? '✅ Accumulation written' : '❌ Failed', Array.from(buf).map(v => useHalf ? v : v.toFixed(2)));
+          
+          results.oit.twoPassPossible = success;
+          results.oit.possible = success;
+        } else {
+          results.oit.possible = false;
         }
         
         gl.deleteFramebuffer(fb);
         gl.deleteTexture(accumTex);
         gl.deleteTexture(revealTex);
       }
+    } else {
+      // blendFunci 있는 경우 - One-pass 테스트
+      log('MODE', 'One-pass OIT (blendFunci available)');
+      results.oit.onePassPossible = results.mrt.rgba8_rgba32f || results.mrt.rgba16f_rgba16f;
+      results.oit.possible = results.oit.onePassPossible;
     }
     
-    // Final summary
+    // 최종 결과
     updateStatus('테스트 완료');
     setProgress(100);
     
+    finalResults = results;
+    
+    // 요약 생성
     log('\n========================================');
     log('FINAL SUMMARY');
     log('========================================');
-    log('WebGL2:', results.webgl2 ? '✅' : '❌');
-    log('Float32 FBO:', results.floatFBO.rgba32f ? '✅' : '❌');
-    log('Float16 FBO:', results.floatFBO.rgba16f ? '✅' : '❌');
-    log('Basic MRT:', results.mrt.basic ? '✅' : '❌');
-    log('Float MRT:', results.mrt.float ? '✅' : '❌');
-    log('Half-Float MRT:', results.mrt.mixed ? '✅' : '❌');
-    log('Float+Depth:', results.depthStencil.withFloat ? '✅' : '❌');
-    log('Float Blit:', results.blit.floatToByte ? '✅' : '❌');
-    log('Babylon OIT Sim:', results.babylonOITSim ? '✅' : '❌');
     
-    // Diagnosis
-    log('\n--- DIAGNOSIS ---');
+    const summaryLines = [];
+    summaryLines.push(`<strong>WebGL2:</strong> ${results.webgl2 ? '✅' : '❌'}`);
+    summaryLines.push(`<strong>gl.blendFunci:</strong> ${results.blendFunctions.blendFunci ? '✅' : '<span class="critical">❌ CRITICAL</span>'}`);
+    summaryLines.push(`<strong>Float32 FBO:</strong> ${results.floatFBO.rgba32f ? '✅' : '❌'}`);
+    summaryLines.push(`<strong>Float16 FBO:</strong> ${results.floatFBO.rgba16f ? '✅' : '❌'}`);
+    summaryLines.push(`<strong>Basic MRT:</strong> ${results.mrt.rgba8_rgba8 ? '✅' : '❌'}`);
+    summaryLines.push(`<strong>Float MRT:</strong> ${results.mrt.rgba8_rgba32f ? '✅' : '❌'}`);
+    summaryLines.push(`<strong>OIT Possible:</strong> ${results.oit.possible ? '✅' : '❌'}`);
+    
+    let diagnosis = '';
+    let summaryType = 'info';
+    
     if (!results.webgl2) {
-      log('ISSUE', 'WebGL2 not available at all');
-    } else if (!results.mrt.basic) {
-      log('ISSUE', 'MRT not supported (drawBuffers failed)');
-    } else if (!results.floatFBO.rgba32f && !results.floatFBO.rgba16f) {
-      log('ISSUE', 'No floating point FBO support');
-    } else if (!results.mrt.float && !results.mrt.mixed) {
-      log('ISSUE', 'MRT works but not with float textures (iOS 17 specific?)');
-      log('HINT', 'Try using RGBA16F instead of RGBA32F, or ensure depth attachment is present');
-    } else if (!results.depthStencil.withFloat && results.depthStencil.withoutDepth) {
-      log('ISSUE', 'Float FBO requires depth attachment on this device');
-      log('HINT', 'Always attach depth buffer to float FBOs');
-    } else if (!results.blit.floatToByte) {
-      log('ISSUE', 'Blit from float to byte failed (post-processing issue)');
-    } else if (!results.babylonOITSim) {
-      log('ISSUE', 'OIT simulation failed - check shader compilation or blend modes');
+      diagnosis = '<strong>❌ WebGL2 미지원</strong><br>브라우저가 WebGL2를 지원하지 않습니다.';
+      summaryType = 'error';
+    } else if (!results.blendFunctions.blendFunci) {
+      if (results.oit.twoPassPossible) {
+        diagnosis = '<strong>⚠️ 제한적 OIT 지원</strong><br>gl.blendFunci 미지원으로 표준 OIT는 불가능하지만, Two-pass Workaround는 가능합니다.<br><br><strong>Babylon.js 수정 필요:</strong> iOS 감지 시 자동으로 two-pass 모드로 전환';
+        summaryType = 'warn';
+      } else {
+        diagnosis = '<strong>❌ OIT 불가능</strong><br>gl.blendFunci 미지원 + MRT Float 불가로 OIT를 구현할 수 없습니다.';
+        summaryType = 'error';
+      }
+    } else if (!results.oit.possible) {
+      diagnosis = '<strong>❌ OIT 불가능</strong><br>MRT Float FBO 생성 실패로 OIT를 구현할 수 없습니다.';
+      summaryType = 'error';
     } else {
-      log('STATUS', 'All tests passed - OIT should work');
+      diagnosis = '<strong>✅ OIT 완전 지원</strong><br>모든 필요 기능이 사용 가능합니다.';
+      summaryType = 'success';
     }
     
-    // iOS specific hints
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if (isIOS) {
-      log('\n--- iOS SPECIFIC NOTES ---');
-      log('USER_AGENT', navigator.userAgent);
-      log('IOS_VERSION', 'Check Settings > General > About');
-      log('KNOWN_ISSUE', 'iOS 17.0-17.4 had WebGL2 float texture bugs');
-      log('WORKAROUND', 'Try using HALF_FLOAT instead of FLOAT');
-      log('WORKAROUND', 'Ensure depth/stencil attachment on all FBOs');
-      log('WORKAROUND', 'Avoid blitFramebuffer between different formats');
-    }
+    showSummary(`
+      <div style="margin-bottom: 12px;">${summaryLines.join('<br>')}</div>
+      <div style="border-top: 1px solid #ddd; padding-top: 12px; margin-top: 12px;">
+        ${diagnosis}
+      </div>
+    `, summaryType);
+    
+    // 버튼 상태 업데이트
+    startBtn.disabled = false;
+    startBtn.textContent = '🔍 다시 시도';
+    copyBtn.style.display = 'block';
+    
+  } catch (err) {
+    log('FATAL_ERROR', err.message);
+    updateStatus('오류 발생');
+    startBtn.disabled = false;
+    startBtn.textContent = '🔍 다시 시도';
   }
+}
+
+function copyResults() {
+  const textToCopy = `WebGL2 OIT Diagnostic Results\n` +
+    `Timestamp: ${finalResults.timestamp}\n` +
+    `User Agent: ${finalResults.userAgent}\n` +
+    `GPU: ${finalResults.gpuRenderer || 'Unknown'}\n` +
+    `Vendor: ${finalResults.gpuVendor || 'Unknown'}\n\n` +
+    `WebGL2: ${finalResults.webgl2}\n` +
+    `blendFunci: ${finalResults.blendFunctions?.blendFunci}\n` +
+    `Float32 FBO: ${finalResults.floatFBO?.rgba32f}\n` +
+    `Float16 FBO: ${finalResults.floatFBO?.rgba16f}\n` +
+    `Basic MRT: ${finalResults.mrt?.rgba8_rgba8}\n` +
+    `Float MRT: ${finalResults.mrt?.rgba8_rgba32f}\n` +
+    `OIT Possible: ${finalResults.oit?.possible}\n\n` +
+    `Full Log:\n${logText}`;
   
-  // Auto-run
-  window.addEventListener('load', () => {
-    setTimeout(runTests, 100);
-  });
-})();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      alert('결과가 클립보드에 복사되었습니다!');
+    }).catch(() => {
+      // Fallback
+      const textarea = document.createElement('textarea');
+      textarea.value = textToCopy;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      alert('결과가 클립보드에 복사되었습니다!');
+    });
+  } else {
+    // Final fallback
+    const textarea = document.createElement('textarea');
+    textarea.value = textToCopy;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    alert('결과가 클립보드에 복사되었습니다!');
+  }
+}
+
+// 페이지 로드 시 자동 실행 여부 (원하면 주석 해제)
+// window.addEventListener('load', () => setTimeout(runDiagnostics, 500));
 </script>
 </body>
 </html>
