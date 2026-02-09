@@ -1,339 +1,591 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>WebGL2 / OIT Diagnostic</title>
+<title>WebGL2 OIT Deep Diagnostic</title>
 <style>
-  :root{--bg:#fff;--muted:#6b7280;--ok:#0a8;--bad:#d33;--warn:#e6a600}
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:18px; color:#111; background:var(--bg)}
-  h1{font-size:18px; margin:0 0 8px}
-  p{margin:6px 0 12px; color:var(--muted)}
-  #canvasWrap{display:none}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-  .card{border:1px solid #e6e9ee;border-radius:8px;padding:12px;background:#fbfcfe}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px;border-bottom:1px solid #eef2f7;text-align:left}
-  th{background:#f6f8fa;font-weight:600}
-  .status{font-weight:700}
-  .ok{color:var(--ok)}
-  .no{color:var(--bad)}
-  .warn{color:var(--warn)}
-  pre#console{background:#0b1220;color:#dbeafe;padding:12px;border-radius:6px;overflow:auto;max-height:260px}
-  .small{font-size:12px;color:var(--muted)}
-  .btn{display:inline-block;padding:8px 10px;border-radius:6px;background:#0b5fff;color:#fff;text-decoration:none;font-weight:600;margin-top:8px}
-  .hint{margin-top:8px;font-size:13px;color:var(--muted)}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:13px}
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #1a1a1a; line-height: 1.6; background: #f5f5f7; }
+  h3 { margin-top: 0; color: #000; }
+  pre { background: #fff; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; border: 1px solid #e0e0e0; white-space: pre-wrap; word-break: break-all; }
+  .section { background: #fff; padding: 16px; margin: 12px 0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .ok { color: #34c759; font-weight: 600; }
+  .no { color: #ff3b30; font-weight: 600; }
+  .warn { color: #ff9500; font-weight: 600; }
+  .info { color: #007aff; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  td, th { border: 1px solid #e0e0e0; padding: 8px; text-align: left; }
+  th { background: #f8f8f8; font-weight: 600; }
+  .test-result { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px; }
+  .test-pass { background: #d4edda; color: #155724; }
+  .test-fail { background: #f8d7da; color: #721c24; }
+  .test-warn { background: #fff3cd; color: #856404; }
+  button { background: #007aff; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; margin: 8px 0; }
+  button:active { opacity: 0.8; }
+  #canvas-container { display: none; }
 </style>
 </head>
 <body>
-  <h1>WebGL2 / OIT Diagnostic</h1>
-  <p>페이지가 로드되면 자동으로 진단을 실행합니다. 아래 결과가 각 기기에서의 WebGL2/확장·FBO 지원 상태를 직관적으로 보여줍니다.</p>
+<h3>🧪 WebGL2 OIT Deep Diagnostic</h3>
+<p>iOS 17.7.1 vs 18.6.2 OIT 호환성 문제 특화 진단. 자동 실행되며, Babylon.js OIT의 실제 동작을 시뮬레이션합니다.</p>
 
-  <div id="canvasWrap">
-    <canvas id="glcanvas" width="256" height="256"></canvas>
+<div class="section">
+  <strong>진행 상태:</strong> <span id="status">대기중...</span>
+  <div id="progress" style="margin-top: 8px; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden;">
+    <div style="width: 0%; height: 100%; background: #007aff; transition: width 0.3s;"></div>
   </div>
+</div>
 
-  <div class="grid">
-    <div class="card">
-      <strong>요약</strong>
-      <table>
-        <tr><th>항목</th><th>결과</th></tr>
-        <tr><td>WebGL2 컨텍스트</td><td id="res-webgl2" class="status mono">-</td></tr>
-        <tr><td>EXT_color_buffer_float</td><td id="res-ext-float" class="status mono">-</td></tr>
-        <tr><td>WEBGL_draw_buffers / EXT_draw_buffers</td><td id="res-drawbuffers" class="status mono">-</td></tr>
-        <tr><td>FRAMEBUFFER 상태</td><td id="res-fb-status" class="status mono">-</td></tr>
-        <tr><td>셰이더 컴파일/링크</td><td id="res-shader" class="status mono">-</td></tr>
-        <tr><td>픽셀 샘플 (COLOR_ATTACHMENT0)</td><td id="res-pixel" class="mono">-</td></tr>
-      </table>
-      <div class="hint">문제가 있으면 아래 콘솔과 확장 목록을 확인하세요.</div>
-    </div>
+<pre id="log">Initializing...</pre>
 
-    <div class="card">
-      <strong>GL 정보 / 렌더러</strong>
-      <div id="gl-info" class="small mono">-</div>
-      <div style="margin-top:8px">
-        <button id="copyBtn" class="btn">콘솔 복사</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <strong>확장(Extensions)</strong>
-      <table id="ext-table">
-        <tr><th>확장명</th><th>지원</th></tr>
-      </table>
-      <div class="hint">확장 미노출 시 OIT(MRT/float) 구현이 불가합니다.</div>
-    </div>
-
-    <div class="card">
-      <strong>프레임버퍼 상태 해석</strong>
-      <div id="fb-interpret" class="small mono">-</div>
-    </div>
-
-    <div class="card" style="grid-column:1 / -1">
-      <strong>디버그 콘솔</strong>
-      <pre id="console">Running tests…</pre>
-    </div>
-  </div>
+<div id="canvas-container"></div>
 
 <script>
-(function(){
-  const el = id => document.getElementById(id);
-  const logEl = el('console');
-  function log(...args){
-    const s = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-    console.log(...args);
-    logEl.textContent += '\\n' + s;
+(function() {
+  const logEl = document.getElementById('log');
+  const statusEl = document.getElementById('status');
+  const progressEl = document.querySelector('#progress div');
+  
+  function setProgress(pct) {
+    progressEl.style.width = pct + '%';
   }
-  function setText(id, text, cls){
-    const node = el(id);
-    node.textContent = text;
-    node.className = 'status mono ' + (cls||'');
+  
+  function updateStatus(msg) {
+    statusEl.textContent = msg;
+    console.log('[Status]', msg);
   }
-  function addExtRow(name, ok){
-    const t = el('ext-table');
-    const tr = document.createElement('tr');
-    const td1 = document.createElement('td'); td1.textContent = name;
-    const td2 = document.createElement('td'); td2.textContent = ok ? '✅' : '❌'; td2.className = ok ? 'ok' : 'no';
-    tr.appendChild(td1); tr.appendChild(td2); t.appendChild(tr);
+  
+  function log(title, ...args) {
+    const line = '[' + new Date().toLocaleTimeString() + '] ' + title + ' ' + args.map(a => {
+      if (a === null) return 'null';
+      if (a === undefined) return 'undefined';
+      if (typeof a === 'object') return JSON.stringify(a);
+      return String(a);
+    }).join(' ');
+    console.log(line);
+    logEl.textContent += '\n' + line;
+    logEl.scrollTop = logEl.scrollHeight;
   }
-
-  // start
-  logEl.textContent = 'Running tests…';
-  log('Attempting getContext("webgl2")...');
-  const canvas = el('glcanvas');
-  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
-
-  setText('res-webgl2', gl ? 'true' : 'false', gl ? 'ok' : 'no');
-  log('webgl2 context available:', !!gl);
-
-  if(!gl){
-    log('FALLBACK: trying webgl (WebGL1) context...');
-    setText('gl-info', 'WebGL2 not available; try WebGL1 fallback', 'no');
-    const gl1 = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    log('webgl (1) available:', !!gl1);
-    el('fb-interpret').textContent = 'WebGL2 미지원: 폴백 필요';
-    return;
+  
+  function resultLabel(ok, text) {
+    const cls = ok ? 'test-pass' : 'test-fail';
+    const icon = ok ? '✓' : '✗';
+    return `<span class="test-result ${cls}">${icon} ${text}</span>`;
   }
+  
+  // Test state
+  const results = {
+    webgl2: false,
+    extensions: {},
+    floatFBO: { rgba32f: false, rgba16f: false, rg32f: false, rg16f: false },
+    mrt: { basic: false, float: false, mixed: false },
+    depthStencil: { withFloat: false, withoutDepth: false },
+    blit: { floatToByte: false, floatToFloat: false },
+    readback: { float: false, halfFloat: false },
+    babylonOITSim: false
+  };
 
-  // GL params
-  try {
-    const ver = gl.getParameter(gl.VERSION);
-    const glsl = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
-    el('gl-info').textContent = 'VERSION: ' + ver + '\\nGLSL: ' + glsl;
-    log('GL VERSION:', ver);
-    log('GLSL VERSION:', glsl);
-  } catch(e){ log('Could not query GL params', e); }
-
-  // extensions to check
-  const extsToCheck = [
-    'EXT_color_buffer_float',
-    'EXT_color_buffer_half_float',
-    'WEBGL_draw_buffers',
-    'EXT_draw_buffers',
-    'OES_texture_float',
-    'OES_texture_half_float',
-    'WEBGL_debug_renderer_info'
-  ];
-  const exts = {};
-  extsToCheck.forEach(name => {
-    try {
-      const v = !!gl.getExtension(name);
-      exts[name] = v;
-      addExtRow(name, v);
-    } catch(e){
-      exts[name] = false;
-      addExtRow(name, false);
+  async function runTests() {
+    updateStatus('WebGL2 컨텍스트 생성 중...');
+    setProgress(5);
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    document.getElementById('canvas-container').appendChild(canvas);
+    
+    const gl = canvas.getContext('webgl2', { 
+      preserveDrawingBuffer: true,
+      antialias: false,
+      alpha: false
+    });
+    
+    if (!gl) {
+      log('FATAL', 'WebGL2 not supported');
+      log('FALLBACK', 'Trying WebGL1...');
+      const gl1 = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      log('WEBGL1', gl1 ? 'Available (OIT impossible)' : 'Not available');
+      updateStatus('WebGL2 미지원 - 테스트 중단');
+      setProgress(100);
+      return;
     }
-  });
-  log('Extensions:', exts);
-
-  // debug renderer info
-  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-  if(dbg){
-    try {
-      const vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
-      const renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
-      el('gl-info').textContent += '\\nVENDOR: ' + vendor + '\\nRENDERER: ' + renderer;
-      log('UNMASKED_VENDOR_WEBGL:', vendor);
-      log('UNMASKED_RENDERER_WEBGL:', renderer);
-    } catch(e){ log('Could not read debug renderer info', e); }
-  } else {
-    log('WEBGL_debug_renderer_info not available');
-  }
-
-  // helper: create texture safely
-  function makeTexture(w,h,internalFormat,format,type){
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    try {
+    
+    results.webgl2 = true;
+    log('WEBGL2', 'Context created successfully');
+    log('VERSION', gl.getParameter(gl.VERSION));
+    log('VENDOR', gl.getParameter(gl.VENDOR));
+    log('RENDERER', gl.getParameter(gl.RENDERER));
+    log('SL_VERSION', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    log('MAX_TEXTURE_SIZE', gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    log('MAX_RENDERBUFFER_SIZE', gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    log('MAX_DRAW_BUFFERS', gl.getParameter(gl.MAX_DRAW_BUFFERS));
+    log('MAX_COLOR_ATTACHMENTS', gl.getParameter(gl.MAX_COLOR_ATTACHMENTS));
+    
+    // Extensions
+    updateStatus('확장 기능 검사 중...');
+    setProgress(15);
+    
+    const extList = [
+      'EXT_color_buffer_float',
+      'EXT_color_buffer_half_float', 
+      'WEBGL_draw_buffers',
+      'OES_texture_float_linear',
+      'OES_texture_half_float_linear',
+      'EXT_float_blend',
+      'WEBGL_debug_renderer_info',
+      'OES_texture_float',
+      'OES_texture_half_float'
+    ];
+    
+    extList.forEach(name => {
+      const ext = gl.getExtension(name);
+      results.extensions[name] = !!ext;
+      log('EXT', name, resultLabel(!!ext, ext ? 'OK' : 'MISSING'));
+    });
+    
+    // Debug info
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    if (dbg) {
+      log('GPU_VENDOR', gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL));
+      log('GPU_RENDERER', gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL));
+    }
+    
+    // Helper functions
+    function createTexture(w, h, internalFormat, format, type) {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
-      log('texImage2D OK for', internalFormat, format, type);
-    } catch(e){
-      log('texImage2D threw', internalFormat, format, type, e);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      return tex;
     }
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    return tex;
-  }
-
-  // FBO + MRT + float test
-  const w = 64, h = 64;
-  const fb = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-
-  // Try create two color attachments: one RGBA8, one RGBA32F (if available)
-  // Use constants if present, otherwise fallback numeric enums
-  const RGBA8 = gl.RGBA8 || 0x8058;
-  const RGBA32F = gl.RGBA32F || 0x8814;
-  const tex0 = makeTexture(w,h, RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-  const tex1_float = makeTexture(w,h, RGBA32F, gl.RGBA, gl.FLOAT);
-
-  try {
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1_float, 0);
-    log('Attached textures to COLOR_ATTACHMENT0/1');
-  } catch(e){
-    log('framebufferTexture2D attach error', e);
-  }
-
-  // drawBuffers
-  let drawBuffersOk = false;
-  try {
-    if (typeof gl.drawBuffers === 'function') {
+    
+    function checkFBOStatus(label) {
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      const map = {
+        0x8CD5: 'COMPLETE',
+        0x8CD6: 'INCOMPLETE_ATTACHMENT',
+        0x8CD7: 'INCOMPLETE_MISSING_ATTACHMENT',
+        0x8CD9: 'UNSUPPORTED',
+        0x8D56: 'INCOMPLETE_MULTISAMPLE'
+      };
+      const statusStr = map[status] || ('0x' + status.toString(16));
+      log('FBO_STATUS', label, statusStr, status === gl.FRAMEBUFFER_COMPLETE ? resultLabel(true, 'OK') : resultLabel(false, 'FAIL'));
+      return status === gl.FRAMEBUFFER_COMPLETE;
+    }
+    
+    // Test 1: Single Float FBO (no MRT)
+    updateStatus('단일 Float FBO 테스트...');
+    setProgress(25);
+    
+    log('\n--- TEST 1: Single Float FBO ---');
+    
+    const formats = [
+      { name: 'RGBA32F', internal: gl.RGBA32F, format: gl.RGBA, type: gl.FLOAT },
+      { name: 'RGBA16F', internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT },
+      { name: 'RG32F', internal: gl.RG32F, format: gl.RG, type: gl.FLOAT },
+      { name: 'RG16F', internal: gl.RG16F, format: gl.RG, type: gl.HALF_FLOAT }
+    ];
+    
+    formats.forEach(fmt => {
+      const fb = gl.createFramebuffer();
+      const tex = createTexture(64, 64, fmt.internal, fmt.format, fmt.type);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      
+      // iOS 17 특수 케이스: depth 없이 float만 있으면 incomplete?
+      const ok = checkFBOStatus(fmt.name);
+      results.floatFBO[fmt.name.toLowerCase()] = ok;
+      
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(tex);
+    });
+    
+    // Test 2: MRT with different combinations
+    updateStatus('MRT (다중 렌더 타겟) 테스트...');
+    setProgress(40);
+    
+    log('\n--- TEST 2: MRT Combinations ---');
+    
+    // 2.1 Basic MRT (RGBA8 + RGBA8)
+    {
+      const fb = gl.createFramebuffer();
+      const tex0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const tex1 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-      drawBuffersOk = true;
+      results.mrt.basic = checkFBOStatus('MRT RGBA8+RGBA8');
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(tex0);
+      gl.deleteTexture(tex1);
+    }
+    
+    // 2.2 MRT with Float (RGBA8 + RGBA32F) - Babylon OIT pattern
+    if (results.extensions['EXT_color_buffer_float']) {
+      const fb = gl.createFramebuffer();
+      const tex0 = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const tex1 = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      results.mrt.float = checkFBOStatus('MRT RGBA8+RGBA32F');
+      
+      if (results.mrt.float) {
+        // Try rendering to it
+        log('RENDER_TEST', 'Attempting MRT shader compile...');
+        const vs = `#version 300 es
+          in vec2 aPos;
+          void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+        const fs = `#version 300 es
+          precision highp float;
+          layout(location = 0) out vec4 out0;
+          layout(location = 1) out vec4 out1;
+          void main() {
+            out0 = vec4(1.0, 0.0, 0.0, 0.5);
+            out1 = vec4(0.0, 1.0, 0.0, 0.5);
+          }`;
+        
+        const vShader = gl.createShader(gl.VERTEX_SHADER);
+        const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(vShader, vs);
+        gl.shaderSource(fShader, fs);
+        gl.compileShader(vShader);
+        gl.compileShader(fShader);
+        
+        if (!gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) {
+          log('FS_COMPILE', 'Failed:', gl.getShaderInfoLog(fShader));
+          results.mrt.float = false;
+        } else {
+          const prog = gl.createProgram();
+          gl.attachShader(prog, vShader);
+          gl.attachShader(prog, fShader);
+          gl.linkProgram(prog);
+          
+          if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            log('PROGRAM_LINK', 'Failed:', gl.getProgramInfoLog(prog));
+            results.mrt.float = false;
+          } else {
+            gl.useProgram(prog);
+            const vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+            gl.viewport(0, 0, 64, 64);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            
+            // Check if it actually rendered
+            gl.readBuffer(gl.COLOR_ATTACHMENT0);
+            const buf0 = new Uint8Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf0);
+            log('READBACK_RGBA8', 'Pixel:', Array.from(buf0));
+            
+            gl.readBuffer(gl.COLOR_ATTACHMENT1);
+            const buf1 = new Float32Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, buf1);
+            log('READBACK_RGBA32F', 'Pixel:', Array.from(buf1).map(v => v.toFixed(2)));
+            
+            const rendered = buf0[0] > 200; // Should be red (255, 0, 0, 128)
+            log('RENDER_OK', resultLabel(rendered, rendered ? 'Pixels written' : 'No pixels'));
+          }
+        }
+      }
+      
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(tex0);
+      gl.deleteTexture(tex1);
+    }
+    
+    // 2.3 Mixed precision MRT
+    if (results.extensions['EXT_color_buffer_half_float']) {
+      const fb = gl.createFramebuffer();
+      const tex0 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
+      const tex1 = createTexture(64, 64, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      results.mrt.mixed = checkFBOStatus('MRT RGBA16F+RGBA16F');
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(tex0);
+      gl.deleteTexture(tex1);
+    }
+    
+    // Test 3: Depth/Stencil with Float
+    updateStatus('깊이/스텐실 버퍼 조합 테스트...');
+    setProgress(60);
+    
+    log('\n--- TEST 3: Depth/Stencil Attachment ---');
+    
+    // 3.1 Float + Depth24_Stencil8
+    {
+      const fb = gl.createFramebuffer();
+      const color = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      const depth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, 64, 64);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, depth);
+      
+      results.depthStencil.withFloat = checkFBOStatus('RGBA32F + DEPTH24_STENCIL8');
+      
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(color);
+      gl.deleteRenderbuffer(depth);
+    }
+    
+    // 3.2 Float only (no depth) - iOS 17 might reject this
+    {
+      const fb = gl.createFramebuffer();
+      const color = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+      
+      results.depthStencil.withoutDepth = checkFBOStatus('RGBA32F only (no depth)');
+      
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(color);
+    }
+    
+    // Test 4: Blit operations (Babylon OIT uses this)
+    updateStatus('Blit/Copy 작업 테스트...');
+    setProgress(75);
+    
+    log('\n--- TEST 4: BlitFramebuffer ---');
+    
+    if (results.mrt.float) {
+      // Create source FBO with float
+      const srcFb = gl.createFramebuffer();
+      const srcTex = createTexture(64, 64, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, srcFb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, srcTex, 0);
+      
+      // Create dest FBO with byte
+      const dstFb = gl.createFramebuffer();
+      const dstTex = createTexture(64, 64, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+      
+      // Clear source to green
+      gl.bindFramebuffer(gl.FRAMEBUFFER, srcFb);
+      gl.clearColor(0, 1, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      
+      // Try blit
+      try {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, srcFb);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dstFb);
+        gl.blitFramebuffer(0, 0, 64, 64, 0, 0, 64, 64, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        
+        // Check dest
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFb);
+        const buf = new Uint8Array(4);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        results.blit.floatToByte = (buf[1] > 200); // Green channel
+        log('BLIT_FLOAT_TO_BYTE', resultLabel(results.blit.floatToByte, results.blit.floatToByte ? 'Success' : 'Failed'), 'Pixel:', Array.from(buf));
+      } catch(e) {
+        log('BLIT_ERROR', e.message);
+        results.blit.floatToByte = false;
+      }
+      
+      gl.deleteFramebuffer(srcFb);
+      gl.deleteFramebuffer(dstFb);
+      gl.deleteTexture(srcTex);
+      gl.deleteTexture(dstTex);
     } else {
-      const extDB = gl.getExtension('WEBGL_draw_buffers') || gl.getExtension('EXT_draw_buffers');
-      if (extDB && typeof extDB.drawBuffersWEBGL === 'function') {
-        extDB.drawBuffersWEBGL([extDB.COLOR_ATTACHMENT0_WEBGL, extDB.COLOR_ATTACHMENT1_WEBGL]);
-        drawBuffersOk = true;
+      log('BLIT_SKIP', 'MRT float not available, skipping blit test');
+    }
+    
+    // Test 5: Babylon.js OIT Simulation
+    updateStatus('Babylon.js OIT 시뮬레이션...');
+    setProgress(90);
+    
+    log('\n--- TEST 5: Babylon OIT Simulation ---');
+    
+    // Babylon OIT creates:
+    // 1. MultiRenderTarget with:
+    //    - textureCount: 2 (color + depth for OIT)
+    //    - types: [Engine.TEXTURETYPE_HALF_FLOAT, Engine.TEXTURETYPE_HALF_FLOAT] or FLOAT
+    //    - formats: [Engine.TEXTUREFORMAT_RGBA, Engine.TEXTUREFORMAT_RGBA]
+    // 2. Uses drawBuffers
+    // 3. Uses blend equations for OIT accumulation
+    
+    if (!results.extensions['EXT_color_buffer_float'] && !results.extensions['EXT_color_buffer_half_float']) {
+      log('OIT_FAIL', 'No float buffer support');
+      results.babylonOITSim = false;
+    } else if (!results.mrt.basic) {
+      log('OIT_FAIL', 'MRT not supported');
+      results.babylonOITSim = false;
+    } else {
+      // Try to create Babylon-like OIT setup
+      const useHalf = results.extensions['EXT_color_buffer_half_float'] && results.mrt.mixed;
+      const useFloat = results.extensions['EXT_color_buffer_float'] && results.mrt.float;
+      
+      const type = useHalf ? 'HALF_FLOAT' : (useFloat ? 'FLOAT' : 'NONE');
+      log('OIT_MODE', 'Attempting with', type);
+      
+      if (type === 'NONE') {
+        results.babylonOITSim = false;
+      } else {
+        const fb = gl.createFramebuffer();
+        const internalFmt = useHalf ? gl.RGBA16F : gl.RGBA32F;
+        const texType = useHalf ? gl.HALF_FLOAT : gl.FLOAT;
+        
+        // Accumulation texture
+        const accumTex = createTexture(256, 256, internalFmt, gl.RGBA, texType);
+        // Revealage texture  
+        const revealTex = createTexture(256, 256, internalFmt, gl.RGBA, texType);
+        
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTex, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, revealTex, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+        
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+          log('OIT_FBO_FAIL', 'Incomplete');
+          results.babylonOITSim = false;
+        } else {
+          // Try OIT blend setup
+          gl.enable(gl.BLEND);
+          // Weighted blended OIT: accum uses (1, 1, 1, 1) blend, reveal uses (0, 0, 0, 1-srcAlpha)
+          // But first just test if we can clear and readback
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          
+          // Draw something with alpha
+          const vs = `#version 300 es
+            in vec2 aPos;
+            void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+          const fs = `#version 300 es
+            precision highp float;
+            layout(location = 0) out vec4 accum;
+            layout(location = 1) out float reveal;
+            void main() {
+              accum = vec4(1.0, 0.0, 0.0, 0.5); // premultiplied alpha
+              reveal = 0.5;
+            }`;
+          
+          const prog = gl.createProgram();
+          const vsObj = gl.createShader(gl.VERTEX_SHADER);
+          const fsObj = gl.createShader(gl.FRAGMENT_SHADER);
+          gl.shaderSource(vsObj, vs);
+          gl.shaderSource(fsObj, fs);
+          gl.compileShader(vsObj);
+          gl.compileShader(fsObj);
+          gl.attachShader(prog, vsObj);
+          gl.attachShader(prog, fsObj);
+          gl.linkProgram(prog);
+          
+          if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            gl.useProgram(prog);
+            const vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+            
+            // OIT requires special blend state
+            gl.blendFunci(0, gl.ONE, gl.ONE); // accum: add
+            gl.blendFunci(1, gl.ZERO, gl.ONE_MINUS_SRC_COLOR); // reveal
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            
+            // Readback
+            gl.readBuffer(gl.COLOR_ATTACHMENT0);
+            const accumBuf = useHalf ? new Uint16Array(4) : new Float32Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, useHalf ? gl.HALF_FLOAT : gl.FLOAT, accumBuf);
+            
+            gl.readBuffer(gl.COLOR_ATTACHMENT1);
+            const revealBuf = useHalf ? new Uint16Array(4) : new Float32Array(4);
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, useHalf ? gl.HALF_FLOAT : gl.FLOAT, revealBuf);
+            
+            log('OIT_READBACK', 'Accum:', Array.from(accumBuf), 'Reveal:', Array.from(revealBuf));
+            
+            // Check if values are reasonable (not zero, not NaN)
+            const valid = accumBuf[0] > 0 || accumBuf[1] > 0 || accumBuf[2] > 0;
+            results.babylonOITSim = valid;
+            log('OIT_RESULT', resultLabel(valid, valid ? 'Working' : 'Failed'));
+          } else {
+            log('OIT_SHADER_FAIL', gl.getProgramInfoLog(prog));
+            results.babylonOITSim = false;
+          }
+        }
+        
+        gl.deleteFramebuffer(fb);
+        gl.deleteTexture(accumTex);
+        gl.deleteTexture(revealTex);
       }
     }
-  } catch(e){
-    log('drawBuffers call failed', e);
-  }
-  setText('res-drawbuffers', String(drawBuffersOk), drawBuffersOk ? 'ok' : 'no');
-  log('drawBuffers available:', drawBuffersOk);
-
-  // framebuffer status
-  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-  const statusMap = {
-    0x8CD5: 'FRAMEBUFFER_COMPLETE',
-    0x8CD6: 'FRAMEBUFFER_INCOMPLETE_ATTACHMENT',
-    0x8CD7: 'FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT',
-    0x8CD9: 'FRAMEBUFFER_UNSUPPORTED'
-  };
-  const statusText = (statusMap[status] || ('UNKNOWN (0x' + status.toString(16) + ')'));
-  setText('res-fb-status', statusText, status === 0x8CD5 ? 'ok' : 'no');
-  el('fb-interpret').textContent = status === 0x8CD5
-    ? 'FRAMEBUFFER_COMPLETE: 해당 FBO 조합(RGBA8 + RGBA32F 등)이 지원됩니다.'
-    : '프레임버퍼 불완전: 특정 텍스처 포맷(MRT/float) 조합이 지원되지 않을 수 있습니다.';
-
-  log('Framebuffer status:', status, statusText);
-
-  // Minimal MRT shader (GLSL ES 3.00)
-  const vsSrc = `#version 300 es
-  in vec2 aPos;
-  void main(){ gl_Position = vec4(aPos,0.0,1.0); }`;
-  const fsSrc = `#version 300 es
-  precision highp float;
-  layout(location = 0) out vec4 out0;
-  layout(location = 1) out vec4 out1;
-  void main(){
-    out0 = vec4(1.0, 0.0, 0.0, 1.0);
-    out1 = vec4(0.0, 1.0, 0.0, 1.0);
-  }`;
-  let programOk = false;
-  try {
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, vsSrc); gl.compileShader(vs);
-    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-      log('Vertex shader compile error:', gl.getShaderInfoLog(vs));
-      throw new Error('VS compile failed');
-    }
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
-    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      const msg = gl.getShaderInfoLog(fs);
-      log('Fragment shader compile error:', msg);
-      setText('res-shader', 'Fragment shader compile failed', 'no');
-      throw new Error('FS compile failed: ' + msg);
-    }
-    const prog = gl.createProgram();
-    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
-    gl.bindAttribLocation(prog, 0, 'aPos');
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      const info = gl.getProgramInfoLog(prog);
-      log('Program link failed:', info);
-      setText('res-shader', 'Program link failed', 'no');
+    
+    // Final summary
+    updateStatus('테스트 완료');
+    setProgress(100);
+    
+    log('\n========================================');
+    log('FINAL SUMMARY');
+    log('========================================');
+    log('WebGL2:', results.webgl2 ? '✅' : '❌');
+    log('Float32 FBO:', results.floatFBO.rgba32f ? '✅' : '❌');
+    log('Float16 FBO:', results.floatFBO.rgba16f ? '✅' : '❌');
+    log('Basic MRT:', results.mrt.basic ? '✅' : '❌');
+    log('Float MRT:', results.mrt.float ? '✅' : '❌');
+    log('Half-Float MRT:', results.mrt.mixed ? '✅' : '❌');
+    log('Float+Depth:', results.depthStencil.withFloat ? '✅' : '❌');
+    log('Float Blit:', results.blit.floatToByte ? '✅' : '❌');
+    log('Babylon OIT Sim:', results.babylonOITSim ? '✅' : '❌');
+    
+    // Diagnosis
+    log('\n--- DIAGNOSIS ---');
+    if (!results.webgl2) {
+      log('ISSUE', 'WebGL2 not available at all');
+    } else if (!results.mrt.basic) {
+      log('ISSUE', 'MRT not supported (drawBuffers failed)');
+    } else if (!results.floatFBO.rgba32f && !results.floatFBO.rgba16f) {
+      log('ISSUE', 'No floating point FBO support');
+    } else if (!results.mrt.float && !results.mrt.mixed) {
+      log('ISSUE', 'MRT works but not with float textures (iOS 17 specific?)');
+      log('HINT', 'Try using RGBA16F instead of RGBA32F, or ensure depth attachment is present');
+    } else if (!results.depthStencil.withFloat && results.depthStencil.withoutDepth) {
+      log('ISSUE', 'Float FBO requires depth attachment on this device');
+      log('HINT', 'Always attach depth buffer to float FBOs');
+    } else if (!results.blit.floatToByte) {
+      log('ISSUE', 'Blit from float to byte failed (post-processing issue)');
+    } else if (!results.babylonOITSim) {
+      log('ISSUE', 'OIT simulation failed - check shader compilation or blend modes');
     } else {
-      programOk = true;
-      setText('res-shader', 'OK', 'ok');
-      gl.useProgram(prog);
-      const vao = gl.createVertexArray();
-      gl.bindVertexArray(vao);
-      const vbo = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
-      gl.viewport(0,0,w,h);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.finish();
-      log('Rendered MRT shader (if supported).');
+      log('STATUS', 'All tests passed - OIT should work');
     }
-  } catch(e){
-    log('Shader/MRT render error', e);
-    if (!programOk) setText('res-shader', 'Failed', 'no');
-  }
-
-  // readPixels from COLOR_ATTACHMENT0
-  try {
-    const readBuf = new Uint8Array(w*h*4);
-    // readBuffer may not exist; try if available
-    if (typeof gl.readBuffer === 'function') {
-      gl.readBuffer(gl.COLOR_ATTACHMENT0);
-    } else {
-      // if using extension, nothing to do here
+    
+    // iOS specific hints
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (isIOS) {
+      log('\n--- iOS SPECIFIC NOTES ---');
+      log('USER_AGENT', navigator.userAgent);
+      log('IOS_VERSION', 'Check Settings > General > About');
+      log('KNOWN_ISSUE', 'iOS 17.0-17.4 had WebGL2 float texture bugs');
+      log('WORKAROUND', 'Try using HALF_FLOAT instead of FLOAT');
+      log('WORKAROUND', 'Ensure depth/stencil attachment on all FBOs');
+      log('WORKAROUND', 'Avoid blitFramebuffer between different formats');
     }
-    gl.readPixels(0,0,w,h,gl.RGBA, gl.UNSIGNED_BYTE, readBuf);
-    const idx = ((Math.floor(h/2)*w) + Math.floor(w/2)) * 4;
-    const r = readBuf[idx], g = readBuf[idx+1], b = readBuf[idx+2], a = readBuf[idx+3];
-    const pixelText = `${r} ${g} ${b} ${a}`;
-    el('res-pixel').textContent = pixelText;
-    log('Center pixel RGBA (uint8) from COLOR_ATTACHMENT0:', r, g, b, a);
-  } catch(e){
-    log('readPixels failed or not allowed:', e);
-    el('res-pixel').textContent = 'readPixels failed';
   }
-
-  // final hints
-  log('\\n--- Quick interpretation hints ---');
-  log('If webgl2=false -> WebGL2 자체 미지원 (폴백 필요).');
-  log('If EXT_color_buffer_float=false -> float FBO 기반 OIT 불가.');
-  log('If drawBuffers available=false -> MRT 기반 OIT 불가.');
-  log('If framebuffer status != FRAMEBUFFER_COMPLETE -> 해당 FBO 조합(예: RGBA32F + MRT) 미지원.');
-  log('If shader link or render failed -> GLSL ES 3.00 / MRT 지원 문제 가능.');
-  log('If readPixels returns expected color -> basic render pipeline 정상.');
-  log('\\nDone. Copy console output and paste it back for analysis.');
-
-  // populate summary fields
-  setText('res-ext-float', String(!!exts['EXT_color_buffer_float']), exts['EXT_color_buffer_float'] ? 'ok' : 'no');
-
-  // copy button
-  el('copyBtn').addEventListener('click', () => {
-    navigator.clipboard.writeText(logEl.textContent).then(()=> {
-      alert('콘솔 로그가 클립보드에 복사되었습니다.');
-    }).catch(()=> alert('복사 실패: 브라우저 권한 필요'));
+  
+  // Auto-run
+  window.addEventListener('load', () => {
+    setTimeout(runTests, 100);
   });
-
-  // cleanup binding
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 })();
 </script>
 </body>
